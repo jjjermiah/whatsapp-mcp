@@ -1,0 +1,5 @@
+# Never bake session keys or message history into an image layer.
+store
+whatsapp-bridge
+Dockerfile
+.dockerignore

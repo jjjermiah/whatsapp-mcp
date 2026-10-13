@@ -20,7 +20,7 @@ whatsapp-mcp/
 ├── whatsapp-bridge/        # Go bridge — talks to WhatsApp Web via whatsmeow
 │   ├── main.go             # REST API + event loop
 │   ├── webhook.go          # Outgoing webhook for incoming messages
-│   └── store/              # SQLite (whatsapp.db, messages.db) + media — gitignored
+│   └── store/              # SQLite (whatsapp.db, messages.db) + media — gitignored; override with WHATSAPP_STORE_DIR
 ├── whatsapp-mcp-server/    # Python MCP server — exposes tools to AI clients
 │   ├── main.py             # FastMCP tool definitions
 │   ├── whatsapp.py         # DB queries + bridge HTTP client
@@ -29,6 +29,8 @@ whatsapp-mcp/
 ```
 
 Data flow: AI client → MCP server (Python) → reads SQLite directly **or** calls bridge REST (`http://localhost:8080/api/*` by default; configurable via `WHATSAPP_API_URL` and `WHATSAPP_BRIDGE_PORT`) → bridge (Go) → WhatsApp Web.
+
+The bridge uses the pure-Go `modernc.org/sqlite` driver (no cgo); build and test with `CGO_ENABLED=0`. Always build DSNs with `sqliteDSN` (`sqlite_driver.go`) so connections keep the busy timeout, foreign keys and mattn-compatible timestamp format the Python server's `datetime.fromisoformat` needs. modernc binds a multi-statement `Exec`'s args from the start for *every* statement — keep statements with `?` args in separate `Exec` calls.
 
 Two SQLite databases:
 
@@ -96,8 +98,9 @@ A failing blocking job is a hard block — fix it or explain in the PR why it's 
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `WHATSAPP_DB_PATH` | `../whatsapp-bridge/store/messages.db` | SQLite path used by the MCP server |
-| `WHATSMEOW_DB_PATH` | `../whatsapp-bridge/store/whatsapp.db` | whatsmeow SQLite (LID ↔ phone resolution via `whatsmeow_lid_map`) |
+| `WHATSAPP_STORE_DIR` | bridge: `store` (relative to its CWD); MCP server: `../whatsapp-bridge/store` | Store directory (`messages.db`, `whatsapp.db`, `.bridge-token`, media). Read by both the bridge and the MCP server; set the same value for both |
+| `WHATSAPP_DB_PATH` | `$WHATSAPP_STORE_DIR/messages.db` | SQLite path used by the MCP server |
+| `WHATSMEOW_DB_PATH` | `$WHATSAPP_STORE_DIR/whatsapp.db` | whatsmeow SQLite (LID ↔ phone resolution via `whatsmeow_lid_map`) |
 | `WHATSAPP_API_URL` | `http://localhost:8080/api` | Bridge REST endpoint |
 | `WHATSAPP_BRIDGE_PORT` | `8080` | Port the bridge binds to |
 | `WHATSAPP_BRIDGE_TOKEN` | generated next to `WHATSMEOW_DB_PATH` as `.bridge-token` | Bearer token required for bridge REST calls |

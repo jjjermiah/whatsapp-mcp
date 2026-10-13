@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/proto/waCommon"
@@ -79,7 +78,9 @@ func querySender(ms *MessageStore, chatJID string) string {
 
 func newTestMessageStore(t *testing.T) *MessageStore {
 	t.Helper()
-	db, err := sql.Open("sqlite3", ":memory:")
+	// _time_format=sqlite matches production's DSN (see sqliteDSN), which
+	// SQL date functions like julianday(?) need to parse bound time.Time values.
+	db, err := sql.Open(sqliteDriver, ":memory:?_time_format=sqlite")
 	if err != nil {
 		t.Fatalf("failed to open in-memory db: %v", err)
 	}
@@ -150,7 +151,7 @@ func TestOpenWhatsmeowContactsDB_MissingPathDoesNotCreateDB(t *testing.T) {
 
 func TestOpenWhatsmeowContactsDB_ReadOnly(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "whatsapp.db")
-	seedDB, err := sql.Open("sqlite3", dbPath)
+	seedDB, err := sql.Open(sqliteDriver, dbPath)
 	if err != nil {
 		t.Fatalf("open seed db: %v", err)
 	}
@@ -617,7 +618,7 @@ func TestGetChatName_LocalContactFallbackScopesToActiveAccount(t *testing.T) {
 	ms := newTestMessageStore(t)
 	logger := testLogger()
 
-	waDB, err := sql.Open("sqlite3", ":memory:")
+	waDB, err := sql.Open(sqliteDriver, ":memory:")
 	if err != nil {
 		t.Fatalf("open whatsmeow db: %v", err)
 	}
@@ -634,11 +635,19 @@ func TestGetChatName_LocalContactFallbackScopesToActiveAccount(t *testing.T) {
 			business_name TEXT,
 			PRIMARY KEY (our_jid, their_jid)
 		);
+	`); err != nil {
+		t.Fatalf("create whatsmeow contacts: %v", err)
+	}
+	// Separate Execs: modernc binds a multi-statement script's args from the
+	// start for every statement, unlike mattn which consumed them in order.
+	if _, err := waDB.Exec(`
 		INSERT INTO whatsmeow_contacts (our_jid, their_jid, first_name, full_name, push_name, business_name)
-			VALUES (?, ?, 'Wrong', 'Wrong Account', '', '');
+			VALUES (?, ?, 'Wrong', 'Wrong Account', '', '')`, otherSelf.String(), phonePN.String()); err != nil {
+		t.Fatalf("seed whatsmeow contacts: %v", err)
+	}
+	if _, err := waDB.Exec(`
 		INSERT INTO whatsmeow_contacts (our_jid, their_jid, first_name, full_name, push_name, business_name)
-			VALUES (?, ?, 'Active First', '', 'Active Push', 'Active Business');
-	`, otherSelf.String(), phonePN.String(), activeSelf.String(), phonePN.String()); err != nil {
+			VALUES (?, ?, 'Active First', '', 'Active Push', 'Active Business')`, activeSelf.String(), phonePN.String()); err != nil {
 		t.Fatalf("seed whatsmeow contacts: %v", err)
 	}
 
@@ -653,7 +662,7 @@ func TestGetChatName_LocalContactFallbackMissingTableFallsBack(t *testing.T) {
 	ms := newTestMessageStore(t)
 	logger := testLogger()
 
-	waDB, err := sql.Open("sqlite3", ":memory:")
+	waDB, err := sql.Open(sqliteDriver, ":memory:")
 	if err != nil {
 		t.Fatalf("open whatsmeow db: %v", err)
 	}
@@ -904,7 +913,7 @@ func TestMigrateLegacyLIDSendersToPhones_RewritesAndIsIdempotent(t *testing.T) {
 	tmpDir := t.TempDir()
 	whatsappDBPath := filepath.Join(tmpDir, "whatsapp.db")
 
-	waDB, err := sql.Open("sqlite3", whatsappDBPath)
+	waDB, err := sql.Open(sqliteDriver, whatsappDBPath)
 	if err != nil {
 		t.Fatalf("failed to create whatsapp db: %v", err)
 	}
@@ -924,17 +933,21 @@ func TestMigrateLegacyLIDSendersToPhones_RewritesAndIsIdempotent(t *testing.T) {
 	chatPhone := "222@s.whatsapp.net"
 	groupChat := "group@g.us"
 
+	// Separate Execs: modernc binds a multi-statement script's args from the
+	// start for every statement, unlike mattn which consumed them in order.
 	if _, err := ms.db.Exec(`
 		INSERT INTO chats (jid, name, last_message_time) VALUES
 			(?, 'Peer', '2026-03-01T10:00:00Z'),
-			(?, 'Group', '2026-03-01T11:00:00Z');
-
+			(?, 'Group', '2026-03-01T11:00:00Z')`, chatPhone, groupChat); err != nil {
+		t.Fatalf("failed to seed chats: %v", err)
+	}
+	if _, err := ms.db.Exec(`
 		INSERT INTO messages (id, chat_jid, sender, content, timestamp, is_from_me, media_type, filename, url, media_key, file_sha256, file_enc_sha256, file_length) VALUES
 			('m1', ?, '111', 'incoming dm pre-fix',  '2026-03-01T10:00:00Z', 0, '', '', '', NULL, NULL, NULL, 0),
 			('m2', ?, '222', 'incoming dm post-fix', '2026-03-01T10:01:00Z', 0, '', '', '', NULL, NULL, NULL, 0),
 			('g1', ?, '333', 'group msg pre-fix',    '2026-03-01T11:00:00Z', 0, '', '', '', NULL, NULL, NULL, 0),
-			('g2', ?, '999', 'group msg unmapped',   '2026-03-01T11:01:00Z', 0, '', '', '', NULL, NULL, NULL, 0);
-	`, chatPhone, groupChat, chatPhone, chatPhone, groupChat, groupChat); err != nil {
+			('g2', ?, '999', 'group msg unmapped',   '2026-03-01T11:01:00Z', 0, '', '', '', NULL, NULL, NULL, 0)
+	`, chatPhone, chatPhone, groupChat, groupChat); err != nil {
 		t.Fatalf("failed to seed message store: %v", err)
 	}
 
@@ -1090,7 +1103,7 @@ func TestMigrateLegacyLIDChatsToPhoneJIDs_MigratesAndIsIdempotent(t *testing.T) 
 	tmpDir := t.TempDir()
 	whatsappDBPath := filepath.Join(tmpDir, "whatsapp.db")
 
-	waDB, err := sql.Open("sqlite3", whatsappDBPath)
+	waDB, err := sql.Open(sqliteDriver, whatsappDBPath)
 	if err != nil {
 		t.Fatalf("failed to create whatsapp db: %v", err)
 	}
@@ -1109,17 +1122,22 @@ func TestMigrateLegacyLIDChatsToPhoneJIDs_MigratesAndIsIdempotent(t *testing.T) 
 	lidJID := "111@lid"
 	phoneJID := "222@s.whatsapp.net"
 
+	// Separate Execs: modernc binds a multi-statement script's args from the
+	// start for every statement, unlike mattn which consumed them in order.
 	_, err = ms.db.Exec(`
 		INSERT INTO chats (jid, name, last_message_time, last_read_time) VALUES
 			(?, 'Legacy LID Name', '2026-03-01T10:00:00Z', '2026-03-01T09:30:00Z'),
-			(?, '', '2026-03-01T09:00:00Z', '2026-03-01T08:00:00Z');
-
+			(?, '', '2026-03-01T09:00:00Z', '2026-03-01T08:00:00Z')`, lidJID, phoneJID)
+	if err != nil {
+		t.Fatalf("failed to seed chats: %v", err)
+	}
+	_, err = ms.db.Exec(`
 		INSERT INTO messages (id, chat_jid, sender, content, timestamp, is_from_me, media_type, filename, url, media_key, file_sha256, file_enc_sha256, file_length) VALUES
 			('dup', ?, 'alice', 'lid duplicate', '2026-03-01T10:00:00Z', 0, '', '', '', NULL, NULL, NULL, 0),
 			('only-lid', ?, 'alice', 'lid only', '2026-03-01T10:01:00Z', 0, '', '', '', NULL, NULL, NULL, 0),
 			('dup', ?, 'alice', 'phone duplicate', '2026-03-01T10:00:00Z', 0, '', '', '', NULL, NULL, NULL, 0),
-			('only-phone', ?, 'alice', 'phone only', '2026-03-01T10:02:00Z', 0, '', '', '', NULL, NULL, NULL, 0);
-	`, lidJID, phoneJID, lidJID, lidJID, phoneJID, phoneJID)
+			('only-phone', ?, 'alice', 'phone only', '2026-03-01T10:02:00Z', 0, '', '', '', NULL, NULL, NULL, 0)
+	`, lidJID, lidJID, phoneJID, phoneJID)
 	if err != nil {
 		t.Fatalf("failed to seed message store: %v", err)
 	}
@@ -1367,7 +1385,7 @@ func TestMigrateLegacyLIDChatsToPhoneJIDs_AggregatesByPhoneJIDDeterministically(
 	tmpDir := t.TempDir()
 	whatsappDBPath := filepath.Join(tmpDir, "whatsapp.db")
 
-	waDB, err := sql.Open("sqlite3", whatsappDBPath)
+	waDB, err := sql.Open(sqliteDriver, whatsappDBPath)
 	if err != nil {
 		t.Fatalf("failed to create whatsapp db: %v", err)
 	}
@@ -1388,15 +1406,20 @@ func TestMigrateLegacyLIDChatsToPhoneJIDs_AggregatesByPhoneJIDDeterministically(
 	lidB := "333@lid"
 	phoneJID := "222@s.whatsapp.net"
 
+	// Separate Execs: modernc binds a multi-statement script's args from the
+	// start for every statement, unlike mattn which consumed them in order.
 	_, err = ms.db.Exec(`
 		INSERT INTO chats (jid, name, last_message_time) VALUES
 			(?, 'Older Name', '2026-03-01T10:00:00Z'),
-			(?, 'Newest Name', '2026-03-01T11:00:00Z');
-
+			(?, 'Newest Name', '2026-03-01T11:00:00Z')`, lidA, lidB)
+	if err != nil {
+		t.Fatalf("failed to seed chats: %v", err)
+	}
+	_, err = ms.db.Exec(`
 		INSERT INTO messages (id, chat_jid, sender, content, timestamp, is_from_me, media_type, filename, url, media_key, file_sha256, file_enc_sha256, file_length) VALUES
 			('a1', ?, 'alice', 'from lid A', '2026-03-01T10:00:00Z', 0, '', '', '', NULL, NULL, NULL, 0),
-			('b1', ?, 'bob', 'from lid B', '2026-03-01T11:00:00Z', 0, '', '', '', NULL, NULL, NULL, 0);
-	`, lidA, lidB, lidA, lidB)
+			('b1', ?, 'bob', 'from lid B', '2026-03-01T11:00:00Z', 0, '', '', '', NULL, NULL, NULL, 0)
+	`, lidA, lidB)
 	if err != nil {
 		t.Fatalf("failed to seed message store: %v", err)
 	}

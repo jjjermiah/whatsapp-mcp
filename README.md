@@ -469,8 +469,9 @@ Copy `.env.example` to `.env` and configure as needed:
 | `WEBHOOK_ENABLED`      | `true`                                   | Set to `false` to disable outbound webhooks  |
 | `WHATSAPP_AUTO_DOWNLOAD_MEDIA` | `true` | Automatically download incoming media, including webhook image bytes. `false` keeps webhook metadata/text without `mediaBase64` and leaves downloads to `/api/download` (`download_media`); delayed downloads may fail after media expires. Status messages are stored but never auto-downloaded or forwarded |
 | `FORWARD_SELF`         | `true`                                   | Forward messages sent by self                |
-| `WHATSAPP_DB_PATH`     | `../whatsapp-bridge/store/messages.db`   | Path to SQLite database                      |
-| `WHATSMEOW_DB_PATH`    | `../whatsapp-bridge/store/whatsapp.db`   | whatsmeow DB used for LID ↔ phone resolution |
+| `WHATSAPP_STORE_DIR`   | `store` (bridge, relative to its working directory); `../whatsapp-bridge/store` (MCP server) | Directory holding `messages.db`, `whatsapp.db`, `.bridge-token` and downloaded media. Set the same value for the bridge and the MCP server |
+| `WHATSAPP_DB_PATH`     | `$WHATSAPP_STORE_DIR/messages.db`        | Path to SQLite database (MCP server)         |
+| `WHATSMEOW_DB_PATH`    | `$WHATSAPP_STORE_DIR/whatsapp.db`        | whatsmeow DB used for LID ↔ phone resolution (MCP server) |
 | `WHATSAPP_API_URL`     | `http://localhost:8080/api`              | Go bridge REST API URL                       |
 | `WHATSAPP_BRIDGE_TOKEN` | generated next to `WHATSMEOW_DB_PATH` as `.bridge-token` | Bearer token for bridge REST calls; also signed onto outbound webhook POSTs |
 | `WHATSAPP_MEDIA_ROOTS` | `~/.local/share/whatsapp-mcp/outbox`     | Path-list of directories allowed for outbound media files |
@@ -545,9 +546,11 @@ files there before calling `send_file` or `send_audio_message`, or set
 ### Where runtime data is stored
 
 The bridge keeps its runtime state in `store/`, resolved **relative to its
-working directory**. `WHATSAPP_DB_PATH` and `WHATSMEOW_DB_PATH` configure the
-MCP server's reads; they do not change the bridge's store location. That
-store contains:
+working directory** unless `WHATSAPP_STORE_DIR` names another directory (absolute
+path recommended). Set the same `WHATSAPP_STORE_DIR` for the MCP server so it
+reads the same files and `.bridge-token`; `WHATSAPP_DB_PATH` and
+`WHATSMEOW_DB_PATH` only configure the MCP server's reads and do not change the
+bridge's store location. That store contains:
 
 | Path | Contents |
 | --- | --- |
@@ -679,6 +682,25 @@ do not replace the relocated store with it.
 preserve, omit the `mv` step, create the runtime directory, and launch the built
 binary there. Pair the new device, then point the MCP server at the new databases
 and token as above. This is separate from migrating an existing installation.
+
+### Run in a container or as a Linux service
+
+The bridge is a single static binary (`CGO_ENABLED=0 go build`), so it runs on a
+minimal host or image. Set `WHATSAPP_STORE_DIR` to a persistent absolute path
+(for systemd, e.g. `/var/lib/whatsapp-mcp/store`) and give the same value to the
+MCP server. The bridge disconnects and closes its databases on `SIGTERM`/`SIGINT`,
+so `systemctl stop` shuts it down cleanly.
+
+`whatsapp-bridge/Dockerfile` builds a distroless image with the store at
+`/data`:
+
+```bash
+docker build -t whatsapp-bridge whatsapp-bridge
+docker run -v whatsapp-store:/data whatsapp-bridge
+```
+
+The REST API binds `127.0.0.1` inside the container, so reach it from a sidecar
+sharing the container's network namespace (`--network container:<name>`).
 
 ### Run automatically on macOS
 
@@ -1059,10 +1081,10 @@ also want to delete the local message archive.
 
 ### Windows
 
-Windows requires CGO for go-sqlite3. Install [MSYS2](https://www.msys2.org/) and enable CGO:
+The bridge uses the pure-Go `modernc.org/sqlite` driver, so no C toolchain or
+CGO is needed on any platform; `CGO_ENABLED=0 go build` produces a static binary.
 
 ```bash
-go env -w CGO_ENABLED=1
 go run .
 ```
 
