@@ -1659,7 +1659,8 @@ func sendWhatsAppMessage(client *whatsmeow.Client, messageStore *MessageStore, r
 		applyChatEphemeralSettings(msg, settings)
 	}
 
-	// Send message
+	// Send message (paced when WHATSAPP_SEND_MIN_INTERVAL_MS is set)
+	outboundPacer.Wait()
 	resp, err := client.SendMessage(context.Background(), recipientJID, msg)
 
 	if err != nil {
