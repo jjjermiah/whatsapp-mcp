@@ -9,7 +9,8 @@ from markdown_format import format_outgoing, markdown_to_whatsapp
     [
         # bold / strike
         ("**bold**", "*bold*"),
-        ("__bold__", "*bold*"),
+        ("***both***", "*_both_*"),
+        ("a ***both*** b", "a *_both_* b"),
         ("a **bold** and **more** text", "a *bold* and *more* text"),
         ("**bold with spaces inside**", "*bold with spaces inside*"),
         ("~~gone~~", "~gone~"),
@@ -32,6 +33,21 @@ from markdown_format import format_outgoing, markdown_to_whatsapp
         # not markers: arithmetic, snake_case, unmatched
         ("2**3 and 4**5", "2**3 and 4**5"),
         ("some__snake__case", "some__snake__case"),
+        ("snake_case_name and a_b@example.com", "snake_case_name and a_b@example.com"),
+        ("a**b**c", "a**b**c"),
+        ("2*3*4", "2*3*4"),
+        ("* item one\n* item two", "* item one\n* item two"),
+        # `__x__` is an identifier far more often than Markdown bold
+        ("__bold__", "__bold__"),
+        ("object.__init__ and __pycache__", "object.__init__ and __pycache__"),
+        # URLs are never rewritten
+        ("https://ex.com/__x__/y", "https://ex.com/__x__/y"),
+        ("see https://ex.com/**x**/y now", "see https://ex.com/**x**/y now"),
+        ("**see https://ex.com/a_b**", "*see https://ex.com/a_b*"),
+        ("[t](https://ex.com/**x**/y)", "t (https://ex.com/**x**/y)"),
+        ("**bold** `a` https://ex.com/`b`", "*bold* `a` https://ex.com/`b`"),
+        # a heading only drops its own `**` pairs
+        ("# Price 2*3=6", "*Price 2*3=6*"),
         ("**unclosed", "**unclosed"),
         ("** spaced **", "** spaced **"),
         ("", ""),
