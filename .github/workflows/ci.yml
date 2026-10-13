@@ -63,10 +63,20 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: '1.26'
+      # CGO_ENABLED=0 proves the bridge (pure-Go modernc.org/sqlite) needs no C
+      # toolchain.
       - name: Build
+        env:
+          CGO_ENABLED: "0"
         run: |
           cd whatsapp-bridge
           go build -v ./...
+      - name: Test
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          cd whatsapp-bridge
+          go test ./...
 
   python-test:
     name: Python Tests
