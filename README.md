@@ -154,11 +154,30 @@ Resolve a WhatsApp contact name from a phone number, LID, or full JID.
 - `identifier` (required): Phone number, LID, or full JID (aliases: `phone_number`, `phone`)
   - Examples: `12025551234`, `184125298348272`, `12025551234@s.whatsapp.net`, `184125298348272@lid`
 
+`resolved: true` only means the name is known locally; `resolved: false` does not mean the number is not on WhatsApp. Use `check_whatsapp` for that.
+
 **Natural Language Examples:**
 
 - "What's the name for phone number 5551234567?"
 - "Look up who owns this number"
 - "Who is 184125298348272@lid?"
+
+#### `check_whatsapp`
+
+Check which phone numbers have a WhatsApp account, without sending anything. Calls the bridge (`POST /api/check`), so the bridge must be running.
+
+**Parameters:**
+
+- `phone_numbers` (required): List of phone numbers with country code. `+`, spaces, dashes, dots and parentheses are stripped. An entry without a country code or holding several numbers comes back with an `error` instead of a lookup
+
+Returns `{"success": true, "results": [{"input", "jid", "registered", "error"?}]}` in input order; `jid` is empty for unregistered numbers.
+
+`send_message`/`send_file`/`send_audio_message` to a number WhatsApp reports as unregistered fail with HTTP 422 `not_on_whatsapp` (not a 500), so a bulk send can skip those numbers and continue.
+
+**Natural Language Examples:**
+
+- "Which of these guests are on WhatsApp?"
+- "Is +1 647 669 8464 on WhatsApp?"
 
 ### Message Operations
 
@@ -186,8 +205,8 @@ Send a text message to a contact or group, optionally as a quoted reply.
 
 **Parameters:**
 
-- `recipient` (required): Phone number or group JID
-- `message` (required): Text content to send
+- `recipient` (required): One phone number with country code (a leading `+`, spaces, dashes, dots and parentheses are stripped), or a JID. The bridge never guesses a country code: a number with 10 or fewer digits, or input holding more than one number (`a / b`, `a, b`), fails with HTTP 400 `invalid_recipient` before anything is sent
+- `message` (required): Text content to send. WhatsApp formats `*bold*`, `_italic_`, `~strike~`, `` `mono` `` and ` ```code blocks``` `. Markdown `**bold**`, `__bold__`, `~~strike~~`, `# headings` and `[text](url)` links are converted automatically (`*x*`, `~x~`, `*Heading*`, `text (url)`); code spans and fences and single `*x*`/`_x_` are left alone. Set `WHATSAPP_MARKDOWN_CONVERT=0` to disable
 - `quoted_message_id` (optional): ID of the message to reply to. When provided, the sent message appears as a quoted reply in WhatsApp.
 - `quoted_sender_jid` (optional): Full JID of the author of the quoted message. Required for group replies so WhatsApp renders the correct attribution header.
 - `quoted_content` (optional): Text content of the quoted message, used for the reply preview. Only plain text is supported.
@@ -369,6 +388,19 @@ Cache reads and writes use both message ID and chat JID.
 - `chat_jid` (required): JID of the chat containing the message
 - `force` (optional): transcribe again even when a transcript is stored
 
+### Bridge Operations
+
+#### `bridge_status`
+
+Check that the Go bridge is up and connected, and how fresh the data the MCP server reads is. Reading tools use `messages.db` and keep working when the bridge is dead, so a stopped bridge is otherwise invisible until a send fails.
+
+Returns `bridge_url`, `reachable`, `connected`, `status` (`ok`, `disconnected`, `unreachable`), `db_path` (the database being read), `newest_message_timestamp`, and `message`/`db_error` on failure. Sending tools answer `Bridge not reachable at <url>` when the bridge is down.
+
+**Natural Language Examples:**
+
+- "Is the WhatsApp bridge running?"
+- "Why are my latest messages missing?"
+
 ### Chat Operations
 
 All chat tools (`list_chats`, `get_chat`, `get_direct_chat_by_contact`,
@@ -475,6 +507,8 @@ Copy `.env.example` to `.env` and configure as needed:
 | `WHATSAPP_API_URL`     | `http://localhost:8080/api`              | Go bridge REST API URL                       |
 | `WHATSAPP_BRIDGE_TOKEN` | generated next to `WHATSMEOW_DB_PATH` as `.bridge-token` | Bearer token for bridge REST calls; also signed onto outbound webhook POSTs |
 | `WHATSAPP_MEDIA_ROOTS` | `~/.local/share/whatsapp-mcp/outbox`     | Path-list of directories allowed for outbound media files |
+| `WHATSAPP_SEND_MIN_INTERVAL_MS` | `0` (off)                          | Minimum milliseconds between outbound sends from the bridge. Concurrent sends queue instead of failing, so each send may take that long to return. `10000`-`30000` suits bulk sends to people who have never messaged the account |
+| `WHATSAPP_MARKDOWN_CONVERT` | `1` (on)                           | Convert Markdown in `send_message`/`send_file` text to WhatsApp formatting. `0`/`false`/`no`/`off` sends text verbatim |
 | `WHATSAPP_DEVICE_NAME` | `whatsmeow` (whatsmeow default)          | Label shown for this connection under WhatsApp > Linked Devices. Set to a recognisable name. Applies at pair time only (re-pair to change) |
 | `WHATSAPP_PAIR_PHONE`  | unset                                    | Phone number (international format) to pair with via an 8-character code instead of a QR scan; same as `--pair-phone` |
 | `WHATSAPP_QR_PNG_PATH` | `<WHATSAPP_STORE_DIR>/qr.png`            | Where the bridge writes the pairing QR as a PNG (also drawn in the terminal). Deleted once pairing succeeds |
@@ -990,11 +1024,12 @@ flowchart LR
         HEALTH["/api/health"]
     end
 
-    subgraph MCPTools["MCP Tools (15 total)"]
+    subgraph MCPTools["MCP Tools (19 total)"]
         direction TB
-        CONT["Contact Tools<br/>search_contacts, get_contact"]
+        CONT["Contact Tools<br/>search_contacts, get_contact, check_whatsapp"]
         MSG["Message Tools<br/>list_messages, send_message, etc."]
         CHAT["Chat Tools<br/>list_chats, get_chat, etc."]
+        BRIDGE["Bridge Tools<br/>bridge_status"]
         MEDIA["Media Tools<br/>send_file, download_media, etc."]
     end
 
@@ -1114,6 +1149,10 @@ are documented in [docs/RELEASING.md](docs/RELEASING.md).
 - **Bridge returns 403 Forbidden for media_path**: Move the file into
   `~/.local/share/whatsapp-mcp/outbox` or add its absolute parent directory to
   `WHATSAPP_MEDIA_ROOTS`.
+- **Sending to a new phone number fails with `no LID found`**: Update and
+  restart the bridge. It now checks the number with WhatsApp and uses the
+  returned LID when the local mapping is missing. Brazilian mobile numbers
+  may be returned in a canonical form without the ninth digit.
 
 ### App State / LTHash Conflicts
 

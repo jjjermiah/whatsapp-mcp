@@ -1356,11 +1356,24 @@ func handleMessageRevoke(messageStore *MessageStore, msg *waProto.Message, chatJ
 	}
 }
 
+func registeredLID(matches []types.IsOnWhatsAppResponse) types.JID {
+	for _, match := range matches {
+		if match.IsIn && match.JID.Server == types.HiddenUserServer {
+			return match.JID
+		}
+	}
+	return types.JID{}
+}
+
 // resolveRecipientJID parses a phone number or JID string and resolves PN -> LID
 // for personal chats before sending.
 func resolveRecipientJID(client *whatsmeow.Client, recipient string) (types.JID, error) {
 	var recipientJID types.JID
-	var err error
+
+	recipient, err := normalizeRecipient(recipient)
+	if err != nil {
+		return types.JID{}, err
+	}
 
 	if strings.Contains(recipient, "@") {
 		recipientJID, err = types.ParseJID(recipient)
@@ -1387,6 +1400,24 @@ func resolveRecipientJID(client *whatsmeow.Client, recipient string) (types.JID,
 			// Cache miss or cache error — ask the WhatsApp server.
 			if lidErr != nil {
 				fmt.Printf("Warning: LID cache lookup failed for %s: %v, falling back to server\n", recipientJID, lidErr)
+			}
+			// The interactive contact query discovers unknown phone numbers and
+			// persists their PN -> LID mapping. GetUserInfo alone may return no
+			// LID for a number that is not already in the local contact store.
+			matches, lookupErr := client.IsOnWhatsApp(ctx, []string{"+" + recipientJID.User})
+			if lookupErr == nil {
+				// WhatsApp may canonicalize Brazilian mobile numbers by dropping
+				// the ninth digit. This is a single-number query, so its registered
+				// LID is the authoritative match.
+				if resolved := registeredLID(matches); !resolved.IsEmpty() {
+					fmt.Printf("Resolved %s -> %s (interactive contact query)\n", recipientJID, resolved)
+					return resolved, nil
+				}
+				if definitelyNotOnWhatsApp(matches) {
+					return types.JID{}, notOnWhatsApp(recipientJID.User)
+				}
+			} else {
+				fmt.Printf("Warning: interactive contact lookup failed for %s: %v\n", recipientJID, lookupErr)
 			}
 			info, infoErr := client.GetUserInfo(ctx, []types.JID{recipientJID})
 			if infoErr != nil {
@@ -1622,7 +1653,8 @@ func sendWhatsAppMessage(client *whatsmeow.Client, messageStore *MessageStore, r
 		applyChatEphemeralSettings(msg, settings)
 	}
 
-	// Send message
+	// Send message (paced when WHATSAPP_SEND_MIN_INTERVAL_MS is set)
+	outboundPacer.Wait()
 	resp, err := client.SendMessage(context.Background(), recipientJID, msg)
 
 	if err != nil {
@@ -2390,6 +2422,9 @@ func newRESTMux(client *whatsmeow.Client, messageStore *MessageStore, port int, 
 	// On-demand history sync endpoint (see history_ondemand.go)
 	registerHistoryEndpoint(mux, auth, client, messageStore)
 
+	// POST /api/check: is this number on WhatsApp? (see check.go)
+	registerCheckEndpoint(mux, auth, client)
+
 	// Health check endpoint
 	mux.HandleFunc("/api/health", auth(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -2427,6 +2462,10 @@ func newRESTMux(client *whatsmeow.Client, messageStore *MessageStore, port int, 
 			http.Error(w, "Recipient is required", http.StatusBadRequest)
 			return
 		}
+		var ok bool
+		if req.Recipient, ok = normalizeOrReject(w, req.Recipient); !ok {
+			return
+		}
 
 		if req.Message == "" && req.MediaPath == "" {
 			http.Error(w, "Message or media path is required", http.StatusBadRequest)
@@ -2455,6 +2494,16 @@ func newRESTMux(client *whatsmeow.Client, messageStore *MessageStore, port int, 
 		// contain secrets the user pasted into a chat.
 		fmt.Printf("→ /api/send recipient=%q message_len=%d has_media=%v\n",
 			req.Recipient, len(req.Message), resolvedMediaPath != "")
+
+		// Surface caller-fixable recipient problems (not_on_whatsapp) as 4xx
+		// instead of a generic 500. The LID mapping IsOnWhatsApp persists makes
+		// the resolve inside sendWhatsAppMessage a cache hit.
+		if _, err := resolveRecipientJID(client, req.Recipient); err != nil {
+			if re, ok := err.(*recipientError); ok {
+				writeSendError(w, re)
+				return
+			}
+		}
 
 		// Send the message
 		success, message := sendWhatsAppMessage(client, messageStore, req.Recipient, req.Message, resolvedMediaPath, req.QuotedMessageID, req.QuotedSenderJID, req.QuotedContent, req.Mentions)
@@ -2489,6 +2538,15 @@ func newRESTMux(client *whatsmeow.Client, messageStore *MessageStore, port int, 
 		if req.ChatJID == "" || len(req.MessageIDs) == 0 {
 			http.Error(w, "chat_jid and message_ids are required", http.StatusBadRequest)
 			return
+		}
+		var ok bool
+		if req.ChatJID, ok = normalizeOrReject(w, req.ChatJID); !ok {
+			return
+		}
+		if req.SenderJID != "" {
+			if req.SenderJID, ok = normalizeOrReject(w, req.SenderJID); !ok {
+				return
+			}
 		}
 
 		messageIDs := make([]types.MessageID, len(req.MessageIDs))
@@ -2593,6 +2651,10 @@ func newRESTMux(client *whatsmeow.Client, messageStore *MessageStore, port int, 
 		var req ReactRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Recipient == "" || req.MessageID == "" || req.Emoji == nil {
 			http.Error(w, "recipient, message_id, and emoji are required", http.StatusBadRequest)
+			return
+		}
+		var ok bool
+		if req.Recipient, ok = normalizeOrReject(w, req.Recipient); !ok {
 			return
 		}
 		chatJID, err := types.ParseJID(req.Recipient)
@@ -2720,6 +2782,10 @@ func newRESTMux(client *whatsmeow.Client, messageStore *MessageStore, port int, 
 		// Validate request
 		if req.Recipient == "" {
 			http.Error(w, "Recipient is required", http.StatusBadRequest)
+			return
+		}
+		var ok bool
+		if req.Recipient, ok = normalizeOrReject(w, req.Recipient); !ok {
 			return
 		}
 

@@ -9,6 +9,7 @@ from typing import Any
 import requests
 
 import audio
+from markdown_format import format_outgoing
 
 # Configuration via environment variables with sensible defaults
 # WHATSAPP_STORE_DIR is the same variable the bridge uses for its store directory;
@@ -48,6 +49,21 @@ def _bridge_headers() -> dict[str, str]:
     if not token:
         return {}
     return {"Authorization": f"Bearer {token}"}
+
+
+def _bridge_unreachable_message() -> str:
+    return f"Bridge not reachable at {WHATSAPP_API_BASE_URL} (connection refused or timed out). Is the WhatsApp bridge running?"
+
+
+def _http_error(response: Any) -> str:
+    """Format a non-200 bridge response; uses the bridge's {error, message} body when present."""
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    if isinstance(body, dict) and body.get("error") and body.get("message"):
+        return f"Error: HTTP {response.status_code} {body['error']} - {body['message']}"
+    return f"Error: HTTP {response.status_code} - {response.text}"
 
 
 @dataclass
@@ -1058,7 +1074,7 @@ def send_message(
         url = f"{WHATSAPP_API_BASE_URL}/send"
         payload: dict[str, Any] = {
             "recipient": recipient,
-            "message": message,
+            "message": format_outgoing(message),
         }
         if quoted_message_id:
             payload["quoted_message_id"] = quoted_message_id
@@ -1074,8 +1090,10 @@ def send_message(
             result = response.json()
             return result.get("success", False), result.get("message", "Unknown response")
         else:
-            return False, f"Error: HTTP {response.status_code} - {response.text}"
+            return False, _http_error(response)
 
+    except requests.ConnectionError:
+        return False, _bridge_unreachable_message()
     except requests.RequestException as e:
         return False, f"Request error: {str(e)}"
     except json.JSONDecodeError:
@@ -1105,7 +1123,7 @@ def send_file(recipient: str, media_path: str, caption: str = "") -> tuple[bool,
         url = f"{WHATSAPP_API_BASE_URL}/send"
         payload = {"recipient": recipient, "media_path": media_path}
         if caption:
-            payload["message"] = caption
+            payload["message"] = format_outgoing(caption)
 
         response = requests.post(url, json=payload, headers=_bridge_headers())
 
@@ -1114,8 +1132,10 @@ def send_file(recipient: str, media_path: str, caption: str = "") -> tuple[bool,
             result = response.json()
             return result.get("success", False), result.get("message", "Unknown response")
         else:
-            return False, f"Error: HTTP {response.status_code} - {response.text}"
+            return False, _http_error(response)
 
+    except requests.ConnectionError:
+        return False, _bridge_unreachable_message()
     except requests.RequestException as e:
         return False, f"Request error: {str(e)}"
     except json.JSONDecodeError:
@@ -1155,7 +1175,7 @@ def send_audio_message(recipient: str, media_path: str) -> tuple[bool, str]:
                 result = response.json()
                 return result.get("success", False), result.get("message", "Unknown response")
             else:
-                return False, f"Error: HTTP {response.status_code} - {response.text}"
+                return False, _http_error(response)
         finally:
             # The converted file is a NamedTemporaryFile(delete=False); remove it
             # once the bridge has read it so every audio send doesn't leak an .ogg.
@@ -1165,12 +1185,83 @@ def send_audio_message(recipient: str, media_path: str) -> tuple[bool, str]:
                 except OSError:
                     pass
 
+    except requests.ConnectionError:
+        return False, _bridge_unreachable_message()
     except requests.RequestException as e:
         return False, f"Request error: {str(e)}"
     except json.JSONDecodeError:
         return False, f"Error parsing response: {response.text}"
     except Exception as e:
         return False, f"Unexpected error: {str(e)}"
+
+
+def bridge_status() -> dict[str, Any]:
+    """Report whether the bridge is up and how fresh the SQLite data being read is.
+
+    Reads come from messages.db and keep working when the bridge is down, so a
+    dead bridge is otherwise invisible until a send fails.
+    """
+    status: dict[str, Any] = {
+        "bridge_url": WHATSAPP_API_BASE_URL,
+        "reachable": False,
+        "connected": None,
+        "status": "unreachable",
+        "db_path": MESSAGES_DB_PATH,
+        "newest_message_timestamp": None,
+    }
+    try:
+        response = requests.get(f"{WHATSAPP_API_BASE_URL}/health", headers=_bridge_headers(), timeout=5)
+        status["reachable"] = True
+        if response.status_code in (200, 503):
+            body = response.json()
+            status["connected"] = bool(body.get("connected"))
+            status["status"] = body.get("status", "unknown")
+        else:
+            status["status"] = "error"
+            status["message"] = _http_error(response)
+    except requests.ConnectionError:
+        status["message"] = _bridge_unreachable_message()
+    except (requests.RequestException, ValueError) as e:
+        status["message"] = f"Bridge health check failed: {e}"
+
+    try:
+        # Read-only URI so a wrong path reports an error instead of creating an empty DB.
+        conn = sqlite3.connect(f"file:{MESSAGES_DB_PATH}?mode=ro", uri=True)
+        try:
+            newest = conn.execute("SELECT MAX(timestamp) FROM messages").fetchone()[0]
+        finally:
+            conn.close()
+        if newest:
+            status["newest_message_timestamp"] = datetime.fromisoformat(newest).isoformat()
+    except (sqlite3.Error, ValueError) as e:
+        status["db_error"] = str(e)
+    return status
+
+
+def check_whatsapp(phone_numbers: list[str]) -> dict[str, Any]:
+    """Ask WhatsApp (through the bridge) which phone numbers have an account.
+
+    Returns {"success": True, "results": [{input, jid, registered, error?}, ...]},
+    or {"success": False, "message": ...} when the bridge cannot answer.
+    """
+    if not phone_numbers:
+        return {"success": False, "message": "At least one phone number must be provided"}
+    try:
+        response = requests.post(
+            f"{WHATSAPP_API_BASE_URL}/check",
+            json={"phone_numbers": phone_numbers},
+            headers=_bridge_headers(),
+            timeout=60,
+        )
+        if response.status_code == 200:
+            return {"success": True, "results": response.json().get("results", [])}
+        return {"success": False, "message": _http_error(response)}
+    except requests.ConnectionError:
+        return {"success": False, "message": _bridge_unreachable_message()}
+    except requests.RequestException as e:
+        return {"success": False, "message": f"Request error: {str(e)}"}
+    except json.JSONDecodeError:
+        return {"success": False, "message": f"Error parsing response: {response.text}"}
 
 
 def send_reaction(
@@ -1216,8 +1307,10 @@ def send_reaction(
                 return True, "Reaction sent"
             return False, result.get("error", "Unknown error")
         else:
-            return False, f"Error: HTTP {response.status_code} - {response.text}"
+            return False, _http_error(response)
 
+    except requests.ConnectionError:
+        return False, _bridge_unreachable_message()
     except requests.RequestException as e:
         return False, f"Request error: {str(e)}"
     except json.JSONDecodeError:
@@ -1260,8 +1353,10 @@ def mark_messages_read(
         if response.status_code == 200:
             result = response.json()
             return result.get("success", False), result.get("message", "Unknown response")
-        return False, f"Error: HTTP {response.status_code} - {response.text}"
+        return False, _http_error(response)
 
+    except requests.ConnectionError:
+        return False, _bridge_unreachable_message()
     except requests.RequestException as e:
         return False, f"Request error: {str(e)}"
     except json.JSONDecodeError:

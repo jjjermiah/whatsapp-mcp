@@ -17,6 +17,12 @@ from whatsapp import (
     msg_to_dict,
 )
 from whatsapp import (
+    bridge_status as whatsapp_bridge_status,
+)
+from whatsapp import (
+    check_whatsapp as whatsapp_check_whatsapp,
+)
+from whatsapp import (
     download_media as whatsapp_download_media,
 )
 from whatsapp import (
@@ -108,7 +114,10 @@ def get_contact(
         phone: Backward-compatible alias for `identifier` (matches README parameter name).
 
     Returns:
-        Dictionary with jid, name, display_name, is_lid, and resolved status
+        Dictionary with jid, name, display_name, is_lid, and resolved status.
+        `resolved` only means the name is known locally (phone contacts / chats /
+        whatsmeow store). It does NOT mean the number is on WhatsApp: use
+        `check_whatsapp` for that.
     """
     if identifier is None:
         identifier = phone_number
@@ -177,6 +186,45 @@ def get_contact(
         "is_lid": is_lid,
         "resolved": resolved,
     }
+
+
+@mcp.tool()
+def bridge_status() -> dict[str, Any]:
+    """Check that the WhatsApp bridge is running and connected, and how fresh the local data is.
+
+    Reading tools use a local database and keep working when the bridge is down, so call
+    this before a send or when messages look stale. Sending tools fail with "Bridge not
+    reachable" when it is down.
+
+    Returns:
+        bridge_url, reachable (bridge answered), connected (bridge is logged in and connected
+        to WhatsApp), status ("ok", "disconnected", "unreachable", ...), db_path (the messages
+        database being read), newest_message_timestamp (latest stored message; old values with a
+        live bridge mean the database being read is not the bridge's), and message/db_error when
+        something failed.
+    """
+    return whatsapp_bridge_status()
+
+
+@mcp.tool()
+def check_whatsapp(phone_numbers: list[str]) -> dict[str, Any]:
+    """Check which phone numbers are registered on WhatsApp, without sending anything.
+
+    Run this before a bulk send to find numbers that would fail with `not_on_whatsapp`.
+    Each lookup asks WhatsApp's servers, so check the numbers you will actually use
+    instead of sweeping large lists.
+
+    Args:
+        phone_numbers: Phone numbers with country code. "+", spaces and dashes are stripped.
+                       Numbers without a country code, or entries holding several numbers,
+                       come back with an `error` instead of a lookup.
+
+    Returns:
+        {"success": True, "results": [{"input", "jid", "registered", "error"?}, ...]}, in
+        input order. `jid` is empty when the number is not registered. On failure (for example
+        the bridge is down) {"success": False, "message": ...}.
+    """
+    return whatsapp_check_whatsapp(phone_numbers)
 
 
 @mcp.tool()
@@ -342,9 +390,13 @@ def send_message(
     """Send a WhatsApp message to a person or group. For group chats use the JID.
 
     Args:
-        recipient: The recipient - either a phone number with country code but no + or other symbols,
+        recipient: The recipient - either ONE phone number with country code ("+", spaces and dashes
+                 are stripped; no country-code guessing, no lists of numbers),
                  or a JID (e.g., "123456789@s.whatsapp.net" or a group JID like "123456789@g.us")
-        message: The message text to send
+        message: The message text to send. WhatsApp formatting is *bold*, _italic_, ~strike~,
+                 `mono` and ```code blocks```; write it natively. Markdown **bold**, __bold__,
+                 ~~strike~~, # headings and [text](url) links are converted automatically
+                 (WHATSAPP_MARKDOWN_CONVERT=0 turns that off).
         quoted_message_id: ID of the message to reply to (optional). When set, the sent
                            message will appear as a quoted reply in WhatsApp.
         quoted_sender_jid: Full JID of the author of the quoted message. Required for
@@ -430,11 +482,12 @@ def send_file(recipient: str, media_path: str, caption: str = "") -> dict[str, A
     needing a separate follow-up send_message call. For group chats use the JID.
 
     Args:
-        recipient: Either a phone number with country code (no + or symbols),
+        recipient: Either ONE phone number with country code ("+", spaces and dashes are stripped),
                  or a JID (e.g., "123456789@s.whatsapp.net" or "123456789@g.us")
         media_path: Absolute path to the media file (image, video, document)
         caption: Optional text rendered with the file as a caption. Omit for a
-                 bare attachment.
+                 bare attachment. Same formatting as send_message: *bold*, _italic_,
+                 ~strike~; Markdown is converted.
 
     Returns:
         A dictionary containing success status and a status message
@@ -450,8 +503,8 @@ def send_audio_message(recipient: str, media_path: str) -> dict[str, Any]:
     """Send any audio file as a WhatsApp audio message to the specified recipient. For group messages use the JID. If it errors due to ffmpeg not being installed, use send_file instead.
 
     Args:
-        recipient: The recipient - either a phone number with country code but no + or other symbols,
-                 or a JID (e.g., "123456789@s.whatsapp.net" or a group JID like "123456789@g.us")
+        recipient: The recipient - either ONE phone number with country code ("+", spaces and dashes
+                 are stripped), or a JID (e.g., "123456789@s.whatsapp.net" or a group JID like "123456789@g.us")
         media_path: The absolute path to the audio file to send (will be converted to Opus .ogg if it's not a .ogg file)
 
     Returns:
