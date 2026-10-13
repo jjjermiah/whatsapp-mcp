@@ -70,7 +70,11 @@ func revokeHandler(client *whatsmeow.Client, messageStore *MessageStore, send re
 		if target.Server == types.DefaultUserServer {
 			// Same PN -> LID addressing /api/send used for the original message.
 			if target, err = resolveRecipientJID(client, storedChat.String()); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
+				if re, ok := err.(*recipientError); ok {
+					writeSendError(w, re)
+					return
+				}
+				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 		}
