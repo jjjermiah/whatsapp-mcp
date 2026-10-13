@@ -14,6 +14,10 @@ import (
 // does not echo our own sends back as events, so without this messages.db
 // keeps showing the reacted-to message as the last word in the chat.
 func storeSentReaction(client *whatsmeow.Client, messageStore *MessageStore, chatJID types.JID, reactedToID, emoji string, resp whatsmeow.SendResponse) {
+	if client.Store.ID == nil {
+		fmt.Printf("Warning: reaction sent but not stored locally: client has no logged-in identity\n")
+		return
+	}
 	storedChat := resolveLIDChat(client, chatJID, types.EmptyJID, types.EmptyJID, true)
 	timestamp := resp.Timestamp
 	if timestamp.IsZero() {

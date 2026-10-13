@@ -69,6 +69,18 @@ func TestStoreSentReaction_RemovalStoredWithEmptyContent(t *testing.T) {
 	}
 }
 
+func TestStoreSentReaction_NoLoggedInIdentityDoesNotPanic(t *testing.T) {
+	client := newTestClient(&mockLIDStore{}) // Store.ID is nil
+	ms := newTestMessageStore(t)
+
+	storeSentReaction(client, ms, phonePN, "3ATARGET", "👍",
+		whatsmeow.SendResponse{ID: "3AREACT4", Timestamp: time.Unix(1710000400, 0)})
+
+	if _, found := readStoredReaction(t, ms, phonePN.String(), "3AREACT4"); found {
+		t.Error("nothing should be stored without a logged-in identity")
+	}
+}
+
 func TestStoreSentReaction_LIDChatStoredUnderPhoneJID(t *testing.T) {
 	lid := types.JID{User: "99887766", Server: types.HiddenUserServer}
 	client := newTestClientWithSelf(
