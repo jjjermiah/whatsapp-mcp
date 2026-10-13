@@ -24,6 +24,9 @@ whatsapp-mcp/
 ├── whatsapp-mcp-server/    # Python MCP server — exposes tools to AI clients
 │   ├── main.py             # FastMCP tool definitions
 │   ├── whatsapp.py         # DB queries + bridge HTTP client
+│   ├── mcp_config.py       # http/sse transport env parsing (host, port, allowed hosts, auth requirement)
+│   ├── mcp_auth.py         # Optional bearer-token ASGI middleware for http/sse
+│   ├── markdown_format.py  # Markdown → WhatsApp text conversion
 │   └── audio.py            # FFmpeg helpers
 └── .github/                # CI, release, security workflows
 ```
@@ -105,11 +108,11 @@ A failing blocking job is a hard block — fix it or explain in the PR why it's 
 | `WHATSAPP_BRIDGE_PORT` | `8080` | Port the bridge binds to |
 | `WHATSAPP_BRIDGE_TOKEN` | generated next to `WHATSMEOW_DB_PATH` as `.bridge-token` | Bearer token required for bridge REST calls |
 | `WHATSAPP_MEDIA_ROOTS` | `~/.local/share/whatsapp-mcp/outbox` | Path-list of directories allowed for outbound media files |
-| `WHATSAPP_SEND_MIN_INTERVAL_MS` | `0` (off) | Minimum milliseconds between outbound text/media/audio sends from the bridge. Concurrent sends queue (wait, not reject), so `/api/send` may take that long to answer. `10000`-`30000` suits bulk sends to people who have never messaged the account |
-| `WHATSAPP_MARKDOWN_CONVERT` | `1` (on) | MCP server rewrites Markdown (`**bold**`, `__bold__`, `~~strike~~`, `# heading`, `[text](url)`) into WhatsApp syntax in `send_message` text and `send_file` captions; code spans and fences are left alone. `0`/`false`/`no`/`off` sends text verbatim |
+| `WHATSAPP_SEND_MIN_INTERVAL_MS` | `0` (off) | Minimum milliseconds between outbound text/media/audio sends from the bridge. Concurrent sends queue (wait, not reject), so `/api/send` may take that long to answer (the MCP server reads the same variable and times out sends at that interval + 30s, 120s for media). `10000`-`30000` suits bulk sends to people who have never messaged the account |
+| `WHATSAPP_MARKDOWN_CONVERT` | `1` (on) | MCP server rewrites Markdown (`**bold**`, `~~strike~~`, `# heading`, `[text](url)`) into WhatsApp syntax in `send_message` text and `send_file` captions; code spans and fences are left alone. `0`/`false`/`no`/`off` sends text verbatim |
 | `WHATSAPP_DEVICE_NAME` | `whatsmeow` (whatsmeow default) | Linked-device label shown in WhatsApp > Linked Devices. Applied at pair time only (`store.DeviceProps.Os`); re-pair to change |
 | `WHATSAPP_PAIR_PHONE` | unset | Phone number (international format, digits) to pair with via an 8-character pairing code instead of a QR scan; same as the bridge's `--pair-phone` flag (flag wins). Only used while no session exists |
-| `WHATSAPP_QR_PNG_PATH` | `store/qr.png` | Where the bridge writes the pairing QR as a PNG (in addition to the terminal rendering); removed once pairing succeeds |
+| `WHATSAPP_QR_PNG_PATH` | `<WHATSAPP_STORE_DIR>/qr.png` | Where the bridge writes the pairing QR as a PNG (in addition to the terminal rendering); removed once pairing succeeds |
 | `WHATSAPP_MCP_TRANSPORT` | `stdio` | MCP transport to serve clients: `stdio`, `http`, or `sse` |
 | `WHATSAPP_MCP_HOST` | `127.0.0.1` | Bind address for the `http`/`sse` transports |
 | `WHATSAPP_MCP_PORT` | `8000` | Port for the `http`/`sse` transports |

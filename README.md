@@ -168,7 +168,7 @@ Check which phone numbers have a WhatsApp account, without sending anything. Cal
 
 **Parameters:**
 
-- `phone_numbers` (required): List of phone numbers with country code. `+`, spaces, dashes, dots and parentheses are stripped. An entry without a country code or holding several numbers comes back with an `error` instead of a lookup
+- `phone_numbers` (required): List of phone numbers with country code. A leading `+`, spaces, dashes, dots, parentheses and a leading apostrophe are stripped. An entry without a country code or holding several numbers comes back with an `error` instead of a lookup
 
 Returns `{"success": true, "results": [{"input", "jid", "registered", "error"?}]}` in input order; `jid` is empty for unregistered numbers.
 
@@ -206,7 +206,7 @@ Send a text message to a contact or group, optionally as a quoted reply.
 **Parameters:**
 
 - `recipient` (required): One phone number with country code (a leading `+`, spaces, dashes, dots and parentheses are stripped), or a JID. The bridge never guesses a country code: a number with 10 or fewer digits, or input holding more than one number (`a / b`, `a, b`), fails with HTTP 400 `invalid_recipient` before anything is sent
-- `message` (required): Text content to send. WhatsApp formats `*bold*`, `_italic_`, `~strike~`, `` `mono` `` and ` ```code blocks``` `. Markdown `**bold**`, `__bold__`, `~~strike~~`, `# headings` and `[text](url)` links are converted automatically (`*x*`, `~x~`, `*Heading*`, `text (url)`); code spans and fences and single `*x*`/`_x_` are left alone. Set `WHATSAPP_MARKDOWN_CONVERT=0` to disable
+- `message` (required): Text content to send. WhatsApp formats `*bold*`, `_italic_`, `~strike~`, `` `mono` `` and ` ```code blocks``` `. Markdown `**bold**`, `~~strike~~`, `# headings` and `[text](url)` links are converted automatically (`*x*`, `~x~`, `*Heading*`, `text (url)`); code spans and fences and single `*x*`/`_x_` are left alone. Set `WHATSAPP_MARKDOWN_CONVERT=0` to disable
 - `quoted_message_id` (optional): ID of the message to reply to. When provided, the sent message appears as a quoted reply in WhatsApp.
 - `quoted_sender_jid` (optional): Full JID of the author of the quoted message. Required for group replies so WhatsApp renders the correct attribution header.
 - `quoted_content` (optional): Text content of the quoted message, used for the reply preview. Only plain text is supported.
@@ -542,7 +542,7 @@ Copy `.env.example` to `.env` and configure as needed:
 | `WHATSAPP_API_URL`     | `http://localhost:8080/api`              | Go bridge REST API URL                       |
 | `WHATSAPP_BRIDGE_TOKEN` | generated next to `WHATSMEOW_DB_PATH` as `.bridge-token` | Bearer token for bridge REST calls; also signed onto outbound webhook POSTs |
 | `WHATSAPP_MEDIA_ROOTS` | `~/.local/share/whatsapp-mcp/outbox`     | Path-list of directories allowed for outbound media files |
-| `WHATSAPP_SEND_MIN_INTERVAL_MS` | `0` (off)                          | Minimum milliseconds between outbound sends from the bridge. Concurrent sends queue instead of failing, so each send may take that long to return. `10000`-`30000` suits bulk sends to people who have never messaged the account |
+| `WHATSAPP_SEND_MIN_INTERVAL_MS` | `0` (off)                          | Minimum milliseconds between outbound sends from the bridge. Concurrent sends queue instead of failing, so each send may take that long to return (the MCP server reads the same variable and waits that long plus 30s, 120s for media, before giving up). `10000`-`30000` suits bulk sends to people who have never messaged the account |
 | `WHATSAPP_MARKDOWN_CONVERT` | `1` (on)                           | Convert Markdown in `send_message`/`send_file` text to WhatsApp formatting. `0`/`false`/`no`/`off` sends text verbatim |
 | `WHATSAPP_DEVICE_NAME` | `whatsmeow` (whatsmeow default)          | Label shown for this connection under WhatsApp > Linked Devices. Set to a recognisable name. Applies at pair time only (re-pair to change) |
 | `WHATSAPP_PAIR_PHONE`  | unset                                    | Phone number (international format) to pair with via an 8-character code instead of a QR scan; same as `--pair-phone` |

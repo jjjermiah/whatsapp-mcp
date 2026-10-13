@@ -227,8 +227,8 @@ def bridge_status() -> dict[str, Any]:
     """Check that the WhatsApp bridge is running and connected, and how fresh the local data is.
 
     Reading tools use a local database and keep working when the bridge is down, so call
-    this before a send or when messages look stale. Sending tools fail with "Bridge not
-    reachable" when it is down.
+    this once before a batch of sends, or when messages look stale. Sending tools fail with
+    "Bridge not reachable" when it is down.
 
     Returns:
         bridge_url, reachable (bridge answered), connected (bridge is logged in and connected
@@ -249,9 +249,10 @@ def check_whatsapp(phone_numbers: list[str]) -> dict[str, Any]:
     instead of sweeping large lists.
 
     Args:
-        phone_numbers: Phone numbers with country code. "+", spaces and dashes are stripped.
-                       Numbers without a country code, or entries holding several numbers,
-                       come back with an `error` instead of a lookup.
+        phone_numbers: Phone numbers with country code. A leading "+", spaces, dashes, dots,
+                       parentheses and a leading apostrophe are stripped. Numbers without a
+                       country code, or entries holding several numbers, come back with an
+                       `error` instead of a lookup.
 
     Returns:
         {"success": True, "results": [{"input", "jid", "registered", "error"?}, ...]}, in
@@ -441,14 +442,19 @@ def send_message(
 ) -> dict[str, Any]:
     """Send a WhatsApp message to a person or group. For group chats use the JID.
 
+    For many recipients, run check_whatsapp first: numbers that are not on WhatsApp fail with
+    `not_on_whatsapp`. A send can take up to the bridge's pacing interval to return. Do not retry
+    a send that timed out: it may have been delivered, so check the chat with list_messages first.
+
     Args:
-        recipient: The recipient - either ONE phone number with country code ("+", spaces and dashes
-                 are stripped; no country-code guessing, no lists of numbers),
-                 or a JID (e.g., "123456789@s.whatsapp.net" or a group JID like "123456789@g.us")
-        message: The message text to send. WhatsApp formatting is *bold*, _italic_, ~strike~,
-                 `mono` and ```code blocks```; write it natively. Markdown **bold**, __bold__,
-                 ~~strike~~, # headings and [text](url) links are converted automatically
-                 (WHATSAPP_MARKDOWN_CONVERT=0 turns that off).
+        recipient: The recipient - either ONE phone number with country code (a leading "+", spaces,
+                 dashes, dots and parentheses are stripped; no country-code guessing, no lists of
+                 numbers), or a JID (e.g., "123456789@s.whatsapp.net" or a group JID like
+                 "123456789@g.us")
+        message: The message text to send. WhatsApp formatting is *bold* (a single asterisk, not
+                 two), _italic_, ~strike~, `mono` and ```code blocks```; write it natively.
+                 Markdown **bold**, ~~strike~~, # headings and [text](url) links are converted
+                 automatically.
         quoted_message_id: ID of the message to reply to (optional). When set, the sent
                            message will appear as a quoted reply in WhatsApp.
         quoted_sender_jid: Full JID of the author of the quoted message. Required for
@@ -505,8 +511,9 @@ def delete_message(chat_jid: str, message_id: str) -> dict[str, Any]:
     """Delete a message you sent for everyone in the chat ("Delete for everyone").
 
     This is irreversible: the message disappears for all recipients and cannot be
-    restored. Only messages sent by this account can be deleted, and the message
-    must exist in the local database. Use list_messages to find the message ID.
+    restored. Only messages sent by this account can be deleted, and WhatsApp only
+    allows delete-for-everyone for a limited time after sending. The message must exist
+    in the local database. Use list_messages to find the message ID.
 
     Args:
         chat_jid: JID of the chat containing the message (e.g., "12025551234@s.whatsapp.net"
