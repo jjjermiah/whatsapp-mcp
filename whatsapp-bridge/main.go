@@ -97,8 +97,14 @@ type ChatEphemeralSettings struct {
 	SettingTimestamp int64
 }
 
+// ensureOwnerOnlyDirectory creates path (0700) and tightens an existing one to
+// 0700, so a store directory created earlier with looser permissions (e.g. by
+// systemd or mkdir) does not leave the session keys group/world readable.
 func ensureOwnerOnlyDirectory(path string) error {
-	return os.MkdirAll(path, 0o700)
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o700)
 }
 
 func writeOwnerOnlyFile(path string, data []byte) error {

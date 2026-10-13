@@ -2845,7 +2845,7 @@ func TestNewMessageStoreCreatesMessagesChatJIDIndex(t *testing.T) {
 	}
 }
 
-func TestEnsureOwnerOnlyDirectoryLeavesExistingPermissionsUntouched(t *testing.T) {
+func TestEnsureOwnerOnlyDirectoryTightensExistingPermissions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "existing")
 	if err := os.Mkdir(path, 0o700); err != nil {
 		t.Fatalf("create existing directory: %v", err)
@@ -2857,7 +2857,7 @@ func TestEnsureOwnerOnlyDirectoryLeavesExistingPermissionsUntouched(t *testing.T
 	if err := ensureOwnerOnlyDirectory(path); err != nil {
 		t.Fatalf("ensureOwnerOnlyDirectory(%q): %v", path, err)
 	}
-	assertPermissionBits(t, path, 0o755)
+	assertPermissionBits(t, path, 0o700)
 }
 
 func TestMediaDownloadStorePathsPreserveStandardJIDs(t *testing.T) {
