@@ -21,6 +21,10 @@ import (
 	"go.mau.fi/whatsmeow/types"
 )
 
+// maxCheckNumbers caps one /api/check request so a single call cannot fan
+// out into an unbounded usync query.
+const maxCheckNumbers = 50
+
 type checkRequest struct {
 	PhoneNumbers []string `json:"phone_numbers"`
 }
@@ -79,6 +83,10 @@ func registerCheckEndpoint(mux *http.ServeMux, auth func(http.HandlerFunc) http.
 		var req checkRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.PhoneNumbers) == 0 {
 			http.Error(w, "phone_numbers is required", http.StatusBadRequest)
+			return
+		}
+		if len(req.PhoneNumbers) > maxCheckNumbers {
+			http.Error(w, fmt.Sprintf("phone_numbers has %d entries; at most %d per request", len(req.PhoneNumbers), maxCheckNumbers), http.StatusBadRequest)
 			return
 		}
 

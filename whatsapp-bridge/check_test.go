@@ -89,6 +89,20 @@ func TestCheckHandler(t *testing.T) {
 			t.Errorf("got %d", resp.Code)
 		}
 	})
+	t.Run("too many numbers is 400", func(t *testing.T) {
+		numbers := make([]string, maxCheckNumbers+1)
+		for i := range numbers {
+			numbers[i] = "\"16476698464\""
+		}
+		body := `{"phone_numbers":[` + strings.Join(numbers, ",") + `]}`
+		if resp := checkRequestTo(t, handler, token, http.MethodPost, body); resp.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for %d numbers, got %d", len(numbers), resp.Code)
+		}
+		at := strings.Join(numbers[:maxCheckNumbers], ",")
+		if resp := checkRequestTo(t, handler, token, http.MethodPost, `{"phone_numbers":[`+at+`]}`); resp.Code != http.StatusServiceUnavailable {
+			t.Errorf("expected the cap to allow %d numbers (503 while disconnected), got %d", maxCheckNumbers, resp.Code)
+		}
+	})
 	t.Run("invalid inputs are reported per entry without a lookup", func(t *testing.T) {
 		resp := checkRequestTo(t, handler, token, http.MethodPost,
 			`{"phone_numbers":["6474571760","9052702348/ 6474571760","1647@s.whatsapp.net"]}`)
