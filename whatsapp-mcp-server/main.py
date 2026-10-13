@@ -16,6 +16,9 @@ from whatsapp import (
     msg_to_dict,
 )
 from whatsapp import (
+    check_whatsapp as whatsapp_check_whatsapp,
+)
+from whatsapp import (
     download_media as whatsapp_download_media,
 )
 from whatsapp import (
@@ -107,7 +110,10 @@ def get_contact(
         phone: Backward-compatible alias for `identifier` (matches README parameter name).
 
     Returns:
-        Dictionary with jid, name, display_name, is_lid, and resolved status
+        Dictionary with jid, name, display_name, is_lid, and resolved status.
+        `resolved` only means the name is known locally (phone contacts / chats /
+        whatsmeow store). It does NOT mean the number is on WhatsApp: use
+        `check_whatsapp` for that.
     """
     if identifier is None:
         identifier = phone_number
@@ -176,6 +182,27 @@ def get_contact(
         "is_lid": is_lid,
         "resolved": resolved,
     }
+
+
+@mcp.tool()
+def check_whatsapp(phone_numbers: list[str]) -> dict[str, Any]:
+    """Check which phone numbers are registered on WhatsApp, without sending anything.
+
+    Run this before a bulk send to find numbers that would fail with `not_on_whatsapp`.
+    Each lookup asks WhatsApp's servers, so check the numbers you will actually use
+    instead of sweeping large lists.
+
+    Args:
+        phone_numbers: Phone numbers with country code. "+", spaces and dashes are stripped.
+                       Numbers without a country code, or entries holding several numbers,
+                       come back with an `error` instead of a lookup.
+
+    Returns:
+        {"success": True, "results": [{"input", "jid", "registered", "error"?}, ...]}, in
+        input order. `jid` is empty when the number is not registered. On failure (for example
+        the bridge is down) {"success": False, "message": ...}.
+    """
+    return whatsapp_check_whatsapp(phone_numbers)
 
 
 @mcp.tool()

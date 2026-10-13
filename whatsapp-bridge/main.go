@@ -1419,6 +1419,9 @@ func resolveRecipientJID(client *whatsmeow.Client, recipient string) (types.JID,
 					fmt.Printf("Resolved %s -> %s (interactive contact query)\n", recipientJID, resolved)
 					return resolved, nil
 				}
+				if definitelyNotOnWhatsApp(matches) {
+					return types.JID{}, notOnWhatsApp(recipientJID.User)
+				}
 			} else {
 				fmt.Printf("Warning: interactive contact lookup failed for %s: %v\n", recipientJID, lookupErr)
 			}
@@ -2424,6 +2427,9 @@ func newRESTMux(client *whatsmeow.Client, messageStore *MessageStore, port int, 
 	// On-demand history sync endpoint (see history_ondemand.go)
 	registerHistoryEndpoint(mux, auth, client, messageStore)
 
+	// POST /api/check: is this number on WhatsApp? (see check.go)
+	registerCheckEndpoint(mux, auth, client)
+
 	// Health check endpoint
 	mux.HandleFunc("/api/health", auth(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -2493,6 +2499,16 @@ func newRESTMux(client *whatsmeow.Client, messageStore *MessageStore, port int, 
 		// contain secrets the user pasted into a chat.
 		fmt.Printf("→ /api/send recipient=%q message_len=%d has_media=%v\n",
 			req.Recipient, len(req.Message), resolvedMediaPath != "")
+
+		// Surface caller-fixable recipient problems (not_on_whatsapp) as 4xx
+		// instead of a generic 500. The LID mapping IsOnWhatsApp persists makes
+		// the resolve inside sendWhatsAppMessage a cache hit.
+		if _, err := resolveRecipientJID(client, req.Recipient); err != nil {
+			if re, ok := err.(*recipientError); ok {
+				writeSendError(w, re)
+				return
+			}
+		}
 
 		// Send the message
 		success, message := sendWhatsAppMessage(client, messageStore, req.Recipient, req.Message, resolvedMediaPath, req.QuotedMessageID, req.QuotedSenderJID, req.QuotedContent, req.Mentions)

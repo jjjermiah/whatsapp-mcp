@@ -154,11 +154,30 @@ Resolve a WhatsApp contact name from a phone number, LID, or full JID.
 - `identifier` (required): Phone number, LID, or full JID (aliases: `phone_number`, `phone`)
   - Examples: `12025551234`, `184125298348272`, `12025551234@s.whatsapp.net`, `184125298348272@lid`
 
+`resolved: true` only means the name is known locally; `resolved: false` does not mean the number is not on WhatsApp. Use `check_whatsapp` for that.
+
 **Natural Language Examples:**
 
 - "What's the name for phone number 5551234567?"
 - "Look up who owns this number"
 - "Who is 184125298348272@lid?"
+
+#### `check_whatsapp`
+
+Check which phone numbers have a WhatsApp account, without sending anything. Calls the bridge (`POST /api/check`), so the bridge must be running.
+
+**Parameters:**
+
+- `phone_numbers` (required): List of phone numbers with country code. `+`, spaces, dashes, dots and parentheses are stripped. An entry without a country code or holding several numbers comes back with an `error` instead of a lookup
+
+Returns `{"success": true, "results": [{"input", "jid", "registered", "error"?}]}` in input order; `jid` is empty for unregistered numbers.
+
+`send_message`/`send_file`/`send_audio_message` to a number WhatsApp reports as unregistered fail with HTTP 422 `not_on_whatsapp` (not a 500), so a bulk send can skip those numbers and continue.
+
+**Natural Language Examples:**
+
+- "Which of these guests are on WhatsApp?"
+- "Is +1 647 669 8464 on WhatsApp?"
 
 ### Message Operations
 
@@ -898,9 +917,9 @@ flowchart LR
         HEALTH["/api/health"]
     end
 
-    subgraph MCPTools["MCP Tools (15 total)"]
+    subgraph MCPTools["MCP Tools (18 total)"]
         direction TB
-        CONT["Contact Tools<br/>search_contacts, get_contact"]
+        CONT["Contact Tools<br/>search_contacts, get_contact, check_whatsapp"]
         MSG["Message Tools<br/>list_messages, send_message, etc."]
         CHAT["Chat Tools<br/>list_chats, get_chat, etc."]
         MEDIA["Media Tools<br/>send_file, download_media, etc."]

@@ -46,6 +46,10 @@ def _bridge_headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _bridge_unreachable_message() -> str:
+    return f"Bridge not reachable at {WHATSAPP_API_BASE_URL} (connection refused or timed out). Is the WhatsApp bridge running?"
+
+
 @dataclass
 class Message:
     timestamp: datetime
@@ -1167,6 +1171,32 @@ def send_audio_message(recipient: str, media_path: str) -> tuple[bool, str]:
         return False, f"Error parsing response: {response.text}"
     except Exception as e:
         return False, f"Unexpected error: {str(e)}"
+
+
+def check_whatsapp(phone_numbers: list[str]) -> dict[str, Any]:
+    """Ask WhatsApp (through the bridge) which phone numbers have an account.
+
+    Returns {"success": True, "results": [{input, jid, registered, error?}, ...]},
+    or {"success": False, "message": ...} when the bridge cannot answer.
+    """
+    if not phone_numbers:
+        return {"success": False, "message": "At least one phone number must be provided"}
+    try:
+        response = requests.post(
+            f"{WHATSAPP_API_BASE_URL}/check",
+            json={"phone_numbers": phone_numbers},
+            headers=_bridge_headers(),
+            timeout=60,
+        )
+        if response.status_code == 200:
+            return {"success": True, "results": response.json().get("results", [])}
+        return {"success": False, "message": f"Error: HTTP {response.status_code} - {response.text}"}
+    except requests.ConnectionError:
+        return {"success": False, "message": _bridge_unreachable_message()}
+    except requests.RequestException as e:
+        return {"success": False, "message": f"Request error: {str(e)}"}
+    except json.JSONDecodeError:
+        return {"success": False, "message": f"Error parsing response: {response.text}"}
 
 
 def send_reaction(
