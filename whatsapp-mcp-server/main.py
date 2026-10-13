@@ -16,6 +16,9 @@ from whatsapp import (
     msg_to_dict,
 )
 from whatsapp import (
+    delete_message as whatsapp_delete_message,
+)
+from whatsapp import (
     download_media as whatsapp_download_media,
 )
 from whatsapp import (
@@ -392,6 +395,26 @@ def send_reaction(
         A dictionary containing success status and a status message
     """
     success, status_message = whatsapp_send_reaction(recipient, message_id, emoji, from_me, sender_jid)
+    return {"success": success, "message": status_message}
+
+
+@mcp.tool()
+def delete_message(chat_jid: str, message_id: str) -> dict[str, Any]:
+    """Delete a message you sent for everyone in the chat ("Delete for everyone").
+
+    This is irreversible: the message disappears for all recipients and cannot be
+    restored. Only messages sent by this account can be deleted, and the message
+    must exist in the local database. Use list_messages to find the message ID.
+
+    Args:
+        chat_jid: JID of the chat containing the message (e.g., "12025551234@s.whatsapp.net"
+                  or a group JID like "123456789@g.us")
+        message_id: ID of the message to delete
+
+    Returns:
+        A dictionary containing success status and a status message
+    """
+    success, status_message = whatsapp_delete_message(chat_jid, message_id)
     return {"success": success, "message": status_message}
 
 

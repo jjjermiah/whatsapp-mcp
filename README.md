@@ -255,6 +255,23 @@ When webhook forwarding is enabled, inbound reactions are also posted to `WEBHOO
 - "React to that message with a thumbs up"
 - "Remove my reaction from the last message in the group chat"
 
+#### `delete_message`
+
+Delete a message you sent **for everyone** in the chat (WhatsApp's "Delete for
+everyone"). This is irreversible. Only messages sent by this account can be
+deleted, and the message must be in the local database (`POST /api/revoke`
+returns 404 otherwise, 403 for someone else's message). On success the local row
+is stamped with `deleted_at`; its content is kept for the archive.
+
+**Parameters:**
+
+- `chat_jid` (required): JID of the chat containing the message
+- `message_id` (required): ID of the message to delete (see `list_messages`)
+
+**Natural Language Examples:**
+
+- "Unsend the message I just sent to Alice by mistake"
+
 #### `send_file`
 
 Send a media file (image, video, document).
@@ -893,6 +910,7 @@ flowchart LR
         READ["/api/mark-read"]
         DOWN["/api/download"]
         REACT["/api/react"]
+        REVOKE["/api/revoke"]
         TYPE["/api/typing"]
         HIST["/api/history"]
         HEALTH["/api/health"]

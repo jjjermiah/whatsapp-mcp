@@ -1222,6 +1222,43 @@ def send_reaction(
         return False, f"Unexpected error: {str(e)}"
 
 
+def delete_message(chat_jid: str, message_id: str) -> tuple[bool, str]:
+    """Delete a message this account sent, for everyone in the chat.
+
+    Args:
+        chat_jid: The chat JID the message belongs to.
+        message_id: The ID of the message to delete.
+
+    Returns:
+        Tuple of (success, status_message).
+    """
+    try:
+        if not chat_jid:
+            return False, "Chat JID must be provided"
+        if not message_id:
+            return False, "Message ID must be provided"
+
+        response = requests.post(
+            f"{WHATSAPP_API_BASE_URL}/revoke",
+            json={"chat_jid": chat_jid, "message_id": message_id},
+            headers=_bridge_headers(),
+        )
+
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("ok"):
+                return True, "Message deleted for everyone"
+            return False, result.get("error", "Unknown error")
+        return False, f"Error: HTTP {response.status_code} - {response.text}"
+
+    except requests.RequestException as e:
+        return False, f"Request error: {str(e)}"
+    except json.JSONDecodeError:
+        return False, f"Error parsing response: {response.text}"
+    except Exception as e:
+        return False, f"Unexpected error: {str(e)}"
+
+
 def mark_messages_read(
     message_ids: list[str],
     chat_jid: str,

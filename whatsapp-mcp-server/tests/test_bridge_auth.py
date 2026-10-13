@@ -83,6 +83,7 @@ def test_send_message_without_token_surfaces_bridge_401(monkeypatch, tmp_path):
         ("download_media", ("msg-id", "12025551234@s.whatsapp.net"), "/download"),
         ("send_reaction", ("12025551234@s.whatsapp.net", "3AABCDEF01234567", "👍"), "/react"),
         ("mark_messages_read", (["3AABCDEF01234567"], "12025551234@s.whatsapp.net"), "/mark-read"),
+        ("delete_message", ("12025551234@s.whatsapp.net", "3AABCDEF01234567"), "/revoke"),
     ],
 )
 def test_bridge_post_helpers_include_auth_headers(monkeypatch, tmp_path, func_name, args, expected_suffix):
@@ -164,6 +165,36 @@ def test_send_reaction_missing_message_id_returns_error():
     success, msg = whatsapp.send_reaction("12025551234@s.whatsapp.net", "", "👍")
     assert success is False
     assert "Message ID" in msg
+
+
+def test_delete_message_posts_payload_and_reports_bridge_errors(monkeypatch):
+    calls = []
+    responses = [
+        DummyResponse(payload={"ok": True}),
+        DummyResponse(status_code=403, text="only messages sent by this account can be deleted"),
+    ]
+    monkeypatch.setenv("WHATSAPP_BRIDGE_TOKEN", "test-token")
+
+    def fake_post(url, json, headers=None):
+        calls.append({"url": url, "json": json})
+        return responses.pop(0)
+
+    monkeypatch.setattr(whatsapp.requests, "post", fake_post)
+
+    ok, _ = whatsapp.delete_message("12025551234@s.whatsapp.net", "3AABCDEF01234567")
+    denied, message = whatsapp.delete_message("12025551234@s.whatsapp.net", "3ATHEIRS")
+
+    assert ok is True
+    assert calls[0]["json"] == {"chat_jid": "12025551234@s.whatsapp.net", "message_id": "3AABCDEF01234567"}
+    assert denied is False
+    assert "HTTP 403" in message
+
+
+@pytest.mark.parametrize(("chat_jid", "message_id"), [("", "3A1"), ("12025551234@s.whatsapp.net", "")])
+def test_delete_message_validates_input(chat_jid, message_id):
+    success, _ = whatsapp.delete_message(chat_jid, message_id)
+
+    assert success is False
 
 
 def test_mark_messages_read_posts_correct_payload(monkeypatch):
