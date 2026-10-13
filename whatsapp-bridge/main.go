@@ -2859,7 +2859,10 @@ func newRESTMux(client *whatsmeow.Client, messageStore *MessageStore, port int, 
 	return mux
 }
 
-func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port int, token string, allowedMediaRoots []string) {
+// startRESTServer serves the REST API in the background. A listener failure
+// (e.g. the port is taken) is reported on fatal: a bridge without its API is
+// useless, and exiting lets the service manager retry.
+func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port int, token string, allowedMediaRoots []string, fatal chan<- error) {
 	handler := newRESTMux(client, messageStore, port, token, allowedMediaRoots)
 
 	// Start the server with proper timeouts. Bind to loopback so the bridge is
@@ -2880,6 +2883,10 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			fmt.Printf("REST API server error: %v\n", err)
+			select {
+			case fatal <- fmt.Errorf("REST API server failed: %w", err):
+			default:
+			}
 		}
 	}()
 }
@@ -2940,8 +2947,109 @@ func renderPairingQRCodes(qrChan <-chan whatsmeow.QRChannelItem, w io.Writer, re
 	return pairingQRChannelClosed
 }
 
+// errPairingIncomplete means a pairing attempt ended without the phone
+// completing the handshake (QR timed out or the channel closed).
+var errPairingIncomplete = errors.New("pairing did not complete")
+
+// sleepCtx waits d, or returns false as soon as ctx is cancelled.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// pairDevice runs one pairing attempt (QR code or pairing code) with a
+// 5-minute budget. On any failure the client is disconnected so the caller can
+// start a fresh attempt immediately.
+func pairDevice(ctx context.Context, logger waLog.Logger, client *whatsmeow.Client, pairPhone string) error {
+	pairCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	qrChan, err := client.GetQRChannel(pairCtx)
+	if err != nil {
+		return fmt.Errorf("get QR channel: %w", err)
+	}
+	if err := client.Connect(); err != nil {
+		return fmt.Errorf("connect: %w", err)
+	}
+
+	// Print QR codes (or a pairing code with --pair-phone) for pairing with
+	// the phone; see pairing.go.
+	switch runPairing(pairCtx, client, qrChan, pairPhone, os.Stdout) {
+	case pairingQRSucceeded:
+		removeQRPNG()
+		fmt.Println("\nSuccessfully connected and authenticated!")
+		return nil
+	case pairingQRTimedOut:
+		logger.Warnf("QR code timed out")
+	case pairingQRChannelClosed:
+		logger.Warnf("Pairing channel closed without a result")
+	}
+	client.Disconnect()
+	return errPairingIncomplete
+}
+
+// connectOrPair connects an already-paired client, or pairs a new one, with up
+// to three attempts. It returns early with an error once ctx is cancelled (a
+// shutdown signal). A pairing attempt that ran out of time retries at once;
+// connection errors wait first, e.g. for the network to come up at boot.
+func connectOrPair(ctx context.Context, logger waLog.Logger, client *whatsmeow.Client, pairPhone string) (err error) {
+	const maxRetries = 3
+	defer func() {
+		// The QR is a one-time secret; do not leave it behind when pairing
+		// was attempted and failed or was interrupted.
+		if err != nil && client.Store.ID == nil {
+			removeQRPNG()
+		}
+	}()
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		logger.Infof("Connection attempt %d/%d...", attempt, maxRetries)
+
+		if client.Store.ID == nil {
+			err = pairDevice(ctx, logger, client, pairPhone)
+		} else {
+			err = client.Connect()
+		}
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		logger.Errorf("Connection attempt %d failed: %v", attempt, err)
+
+		if attempt == maxRetries {
+			break
+		}
+		if !errors.Is(err, errPairingIncomplete) {
+			if !sleepCtx(ctx, 5*time.Second) {
+				return ctx.Err()
+			}
+		}
+	}
+	return err
+}
+
 func main() {
 	flag.Parse()
+	os.Exit(run())
+}
+
+// run is the bridge's body; its result is the process exit code. Every fatal
+// path returns 1 so systemd's Restart=on-failure fires (a bare return would
+// exit 0 and leave the unit dead); a clean SIGINT/SIGTERM stop returns 0.
+// Deferred closes stay in run so they execute before os.Exit.
+func run() int {
+	// Handle signals from the start, so a SIGTERM during pairing or connect
+	// retries shuts the bridge down through the normal path.
+	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	// Set up logger with DEBUG level for more detailed logging
 	logger := waLog.Stdout("Client", "DEBUG", true)
@@ -2952,7 +3060,12 @@ func main() {
 	pairPhone, err := resolvePairPhone(*pairPhoneFlag, os.Getenv("WHATSAPP_PAIR_PHONE"))
 	if err != nil {
 		logger.Errorf("%v", err)
-		return
+		return 1
+	}
+
+	if err := validateSendMinInterval(); err != nil {
+		logger.Errorf("%v", err)
+		return 1
 	}
 
 	// Create database connection for storing session data
@@ -2962,13 +3075,13 @@ func main() {
 	// same reasoning as NewMessageStore.
 	if err := ensureOwnerOnlyDirectory(storeDir()); err != nil {
 		logger.Errorf("Failed to create store directory: %v", err)
-		return
+		return 1
 	}
 
 	container, err := sqlstore.New(context.Background(), sqliteDriver, sqliteDSN(storePath("whatsapp.db"), ""), dbLog)
 	if err != nil {
 		logger.Errorf("Failed to connect to database: %v", err)
-		return
+		return 1
 	}
 	defer func() { _ = container.Close() }()
 
@@ -2981,7 +3094,7 @@ func main() {
 			logger.Infof("Created new device")
 		} else {
 			logger.Errorf("Failed to get device: %v", err)
-			return
+			return 1
 		}
 	}
 
@@ -3028,25 +3141,25 @@ func main() {
 	client := whatsmeow.NewClient(deviceStore, logger)
 	if client == nil {
 		logger.Errorf("Failed to create WhatsApp client")
-		return
+		return 1
 	}
 
 	// Initialize message store
 	messageStore, err := NewMessageStore()
 	if err != nil {
 		logger.Errorf("Failed to initialize message store: %v", err)
-		return
+		return 1
 	}
 	defer func() { _ = messageStore.Close() }()
 
 	if err := messageStore.MigrateLegacyLIDChatsToPhoneJIDs(storePath("whatsapp.db"), logger); err != nil {
 		logger.Errorf("Failed to migrate legacy LID chat rows: %v", err)
-		return
+		return 1
 	}
 
 	if err := messageStore.MigrateLegacyLIDSendersToPhones(storePath("whatsapp.db"), logger); err != nil {
 		logger.Errorf("Failed to migrate legacy LID sender rows: %v", err)
-		return
+		return 1
 	}
 
 	// Resolve the REST API port. Pure env parsing with no dependency on the
@@ -3058,7 +3171,7 @@ func main() {
 		v, err := strconv.Atoi(p)
 		if err != nil || v < 1 || v > 65535 {
 			logger.Errorf("Invalid WHATSAPP_BRIDGE_PORT=%q, must be 1-65535", p)
-			return
+			return 1
 		}
 		port = v
 	}
@@ -3074,7 +3187,7 @@ func main() {
 	bridgeToken, fresh, tokErr := loadOrCreateBridgeToken()
 	if tokErr != nil {
 		logger.Errorf("Failed to initialize bridge token: %v", tokErr)
-		return
+		return 1
 	}
 	webhookAuthToken = bridgeToken
 
@@ -3091,6 +3204,10 @@ func main() {
 
 	// Channel to signal reconnection needs
 	reconnectChan := make(chan bool, 1)
+
+	// Conditions the bridge cannot recover from in-process (logged out, REST
+	// listener failed). run exits non-zero on the first one.
+	fatalChan := make(chan error, 1)
 
 	// Setup event handling for messages and history sync
 	client.AddEventHandler(func(evt interface{}) {
@@ -3185,7 +3302,14 @@ func main() {
 			logger.Infof("✓ Successfully connected to WhatsApp servers")
 
 		case *events.LoggedOut:
-			logger.Warnf("⚠️  Device logged out, please scan QR code to log in again")
+			// The session is gone for good; sends would fail forever while the
+			// health endpoint kept answering. Exit non-zero so the service
+			// manager restarts the bridge into pairing mode.
+			logger.Errorf("❌ Device logged out (reason: %v); re-pairing is required", v.Reason)
+			select {
+			case fatalChan <- errors.New("device logged out"):
+			default:
+			}
 
 		case *events.Disconnected:
 			logger.Warnf("⚠️  Disconnected from WhatsApp servers, will attempt reconnection...")
@@ -3231,91 +3355,21 @@ func main() {
 		}
 	})
 
-	// Create channel to track connection success
-	connected := make(chan bool, 1)
-
-	// Add connection retry logic
-	maxRetries := 3
-	var connErr error
-
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		logger.Infof("Connection attempt %d/%d...", attempt, maxRetries)
-
-		// Connect to WhatsApp
-		if client.Store.ID == nil {
-			// No ID stored, this is a new client, need to pair with phone
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-
-			qrChan, connErr := client.GetQRChannel(ctx)
-			if connErr != nil {
-				logger.Errorf("Failed to get QR channel: %v", connErr)
-				if attempt == maxRetries {
-					return
-				}
-				time.Sleep(5 * time.Second)
-				continue
-			}
-
-			connErr = client.Connect()
-			if connErr != nil {
-				logger.Errorf("Failed to connect (attempt %d): %v", attempt, connErr)
-				if attempt == maxRetries {
-					return
-				}
-				time.Sleep(5 * time.Second)
-				continue
-			}
-
-			// Print QR codes (or a pairing code with --pair-phone) for pairing
-			// with the phone; see pairing.go.
-			switch runPairing(ctx, client, qrChan, pairPhone, os.Stdout) {
-			case pairingQRSucceeded:
-				removeQRPNG()
-				connected <- true
-			case pairingQRTimedOut:
-				logger.Warnf("QR code timed out")
-			case pairingQRChannelClosed:
-			}
-
-			// Wait for connection with timeout
-			select {
-			case <-connected:
-				fmt.Println("\nSuccessfully connected and authenticated!")
-				goto connectionSuccess
-			case <-ctx.Done():
-				logger.Errorf("Timeout waiting for QR code scan (attempt %d)", attempt)
-				client.Disconnect()
-				if attempt == maxRetries {
-					return
-				}
-				time.Sleep(10 * time.Second)
-				continue
-			}
-		} else {
-			// Already logged in, just connect
-			connErr = client.Connect()
-			if connErr != nil {
-				logger.Errorf("Failed to connect (attempt %d): %v", attempt, connErr)
-				if attempt == maxRetries {
-					return
-				}
-				time.Sleep(5 * time.Second)
-				continue
-			}
-			connected <- true
-			break
+	if err := connectOrPair(sigCtx, logger, client, pairPhone); err != nil {
+		if sigCtx.Err() != nil {
+			fmt.Println("Interrupted before connecting; exiting.")
+			return 0
 		}
+		logger.Errorf("Could not connect to WhatsApp: %v", err)
+		return 1
 	}
-
-connectionSuccess:
 
 	// Wait a moment for connection to stabilize
 	time.Sleep(2 * time.Second)
 
 	if !client.IsConnected() {
 		logger.Errorf("Failed to establish stable connection")
-		return
+		return 1
 	}
 
 	fmt.Println("\n✓ Connected to WhatsApp! Type 'help' for commands.")
@@ -3328,15 +3382,11 @@ connectionSuccess:
 	allowedMediaRoots, mrErr := resolveMediaRoots()
 	if mrErr != nil {
 		logger.Errorf("Failed to resolve media roots: %v", mrErr)
-		return
+		return 1
 	}
 	logger.Infof("Allowed media roots: %v", allowedMediaRoots)
 
-	startRESTServer(client, messageStore, port, bridgeToken, allowedMediaRoots)
-
-	// Create a channel to keep the main goroutine alive
-	exitChan := make(chan os.Signal, 1)
-	signal.Notify(exitChan, syscall.SIGINT, syscall.SIGTERM)
+	startRESTServer(client, messageStore, port, bridgeToken, allowedMediaRoots, fatalChan)
 
 	fmt.Println("REST server is running. Press Ctrl+C to disconnect and exit.")
 
@@ -3385,17 +3435,24 @@ connectionSuccess:
 		}
 	}()
 
-	// Wait for termination signal. main is the only reader of exitChan: a
-	// signal is delivered once, so a second reader (the reconnect loop below
-	// used to be one) could swallow SIGTERM and leave main blocked until
-	// systemd's stop timeout SIGKILLs the bridge. Returning from main runs the
-	// deferred DB closes.
-	<-exitChan
+	// Wait for a termination signal or a fatal condition. run is the only
+	// reader of both: a signal context is cancelled for every waiter, but a
+	// second consumer of fatalChan could swallow the event and leave run
+	// blocked until systemd's stop timeout SIGKILLs the bridge. Returning from
+	// run runs the deferred DB closes. A signal is a clean stop (0); a fatal
+	// condition exits non-zero so Restart=on-failure brings the bridge back.
+	exitCode := 0
+	select {
+	case <-sigCtx.Done():
+	case err := <-fatalChan:
+		logger.Errorf("%v; exiting so the service manager can restart the bridge", err)
+		exitCode = 1
+	}
 	close(shutdown)
 
 	fmt.Println("Disconnecting...")
-	// Disconnect client
 	client.Disconnect()
+	return exitCode
 }
 
 // GetChatName determines the appropriate name for a chat based on JID and other info
