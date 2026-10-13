@@ -35,6 +35,11 @@ def resolve_host(value: str | None) -> str:
     return (value or "").strip() or DEFAULT_MCP_HOST
 
 
+def resolve_auth_token(value: str | None) -> str | None:
+    """Parse WHATSAPP_MCP_AUTH_TOKEN; unset or whitespace-only means no auth."""
+    return (value or "").strip() or None
+
+
 def resolve_port(value: str | None) -> int:
     """Parse WHATSAPP_MCP_PORT, defaulting to DEFAULT_MCP_PORT.
 
