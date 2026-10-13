@@ -101,7 +101,7 @@ A failing blocking job is a hard block — fix it or explain in the PR why it's 
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `WHATSAPP_STORE_DIR` | bridge: `store` (relative to its CWD); MCP server: `../whatsapp-bridge/store` | Store directory (`messages.db`, `whatsapp.db`, `.bridge-token`, media). Read by both the bridge and the MCP server; set the same value for both |
+| `WHATSAPP_STORE_DIR` | bridge: `store` (relative to its CWD); MCP server: `../whatsapp-bridge/store` | Store directory (`messages.db`, `whatsapp.db`, `.bridge-token`, media). Read by both the bridge and the MCP server; use the same absolute path for both (the bridge makes it absolute against its CWD) |
 | `WHATSAPP_DB_PATH` | `$WHATSAPP_STORE_DIR/messages.db` | SQLite path used by the MCP server |
 | `WHATSMEOW_DB_PATH` | `$WHATSAPP_STORE_DIR/whatsapp.db` | whatsmeow SQLite (LID ↔ phone resolution via `whatsmeow_lid_map`) |
 | `WHATSAPP_API_URL` | `http://localhost:8080/api` | Bridge REST endpoint |

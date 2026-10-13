@@ -205,7 +205,7 @@ Send a text message to a contact or group, optionally as a quoted reply.
 
 **Parameters:**
 
-- `recipient` (required): One phone number with country code (a leading `+`, spaces, dashes, dots and parentheses are stripped), or a JID. The bridge never guesses a country code: a number with 10 or fewer digits, or input holding more than one number (`a / b`, `a, b`), fails with HTTP 400 `invalid_recipient` before anything is sent
+- `recipient` (required): One phone number with country code (a leading `+`, spaces, dashes, dots and parentheses are stripped), or a JID. The bridge never guesses a country code: bare digits need at least 11 (write shorter international numbers with a leading `+` or `00`, e.g. `+4512345678`, which accepts 8-15 digits), and input holding more than one number (`a / b`, `a, b`), fails with HTTP 400 `invalid_recipient` before anything is sent
 - `message` (required): Text content to send. WhatsApp formats `*bold*`, `_italic_`, `~strike~`, `` `mono` `` and ` ```code blocks``` `. Markdown `**bold**`, `~~strike~~`, `# headings` and `[text](url)` links are converted automatically (`*x*`, `~x~`, `*Heading*`, `text (url)`); code spans and fences and single `*x*`/`_x_` are left alone. Set `WHATSAPP_MARKDOWN_CONVERT=0` to disable
 - `quoted_message_id` (optional): ID of the message to reply to. When provided, the sent message appears as a quoted reply in WhatsApp.
 - `quoted_sender_jid` (optional): Full JID of the author of the quoted message. Required for group replies so WhatsApp renders the correct attribution header.
@@ -536,13 +536,13 @@ Copy `.env.example` to `.env` and configure as needed:
 | `WEBHOOK_ENABLED`      | `true`                                   | Set to `false` to disable outbound webhooks  |
 | `WHATSAPP_AUTO_DOWNLOAD_MEDIA` | `true` | Automatically download incoming media, including webhook image bytes. `false` keeps webhook metadata/text without `mediaBase64` and leaves downloads to `/api/download` (`download_media`); delayed downloads may fail after media expires. Status messages are stored but never auto-downloaded or forwarded |
 | `FORWARD_SELF`         | `true`                                   | Forward messages sent by self                |
-| `WHATSAPP_STORE_DIR`   | `store` (bridge, relative to its working directory); `../whatsapp-bridge/store` (MCP server) | Directory holding `messages.db`, `whatsapp.db`, `.bridge-token` and downloaded media. Set the same value for the bridge and the MCP server |
+| `WHATSAPP_STORE_DIR`   | `store` (bridge, relative to its working directory); `../whatsapp-bridge/store` (MCP server) | Directory holding `messages.db`, `whatsapp.db`, `.bridge-token` and downloaded media. The bridge makes a set value absolute against its working directory, so use the same absolute path for the bridge and the MCP server |
 | `WHATSAPP_DB_PATH`     | `$WHATSAPP_STORE_DIR/messages.db`        | Path to SQLite database (MCP server)         |
 | `WHATSMEOW_DB_PATH`    | `$WHATSAPP_STORE_DIR/whatsapp.db`        | whatsmeow DB used for LID ↔ phone resolution (MCP server) |
 | `WHATSAPP_API_URL`     | `http://localhost:8080/api`              | Go bridge REST API URL                       |
 | `WHATSAPP_BRIDGE_TOKEN` | generated next to `WHATSMEOW_DB_PATH` as `.bridge-token` | Bearer token for bridge REST calls; also signed onto outbound webhook POSTs |
 | `WHATSAPP_MEDIA_ROOTS` | `~/.local/share/whatsapp-mcp/outbox`     | Path-list of directories allowed for outbound media files |
-| `WHATSAPP_SEND_MIN_INTERVAL_MS` | `0` (off)                          | Minimum milliseconds between outbound sends from the bridge. Concurrent sends queue instead of failing, so each send may take that long to return (the MCP server reads the same variable and waits that long plus 30s, 120s for media, before giving up). `10000`-`30000` suits bulk sends to people who have never messaged the account |
+| `WHATSAPP_SEND_MIN_INTERVAL_MS` | `0` (off)                          | Minimum milliseconds between outbound sends from the bridge. Concurrent sends queue instead of failing, so each send may take that long to return (the MCP server reads the same variable and waits that long plus 30s, 120s for media, before giving up). `10000`-`30000` suits bulk sends to people who have never messaged the account. The bridge refuses to start above `30000` |
 | `WHATSAPP_MARKDOWN_CONVERT` | `1` (on)                           | Convert Markdown in `send_message`/`send_file` text to WhatsApp formatting. `0`/`false`/`no`/`off` sends text verbatim |
 | `WHATSAPP_DEVICE_NAME` | `whatsmeow` (whatsmeow default)          | Label shown for this connection under WhatsApp > Linked Devices. Set to a recognisable name. Applies at pair time only (re-pair to change) |
 | `WHATSAPP_PAIR_PHONE`  | unset                                    | Phone number (international format) to pair with via an 8-character code instead of a QR scan; same as `--pair-phone` |
