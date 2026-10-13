@@ -21,6 +21,14 @@ func TestStoreDirDefaultAndOverride(t *testing.T) {
 	}
 }
 
+func TestStoreDirOverrideIsAbsolute(t *testing.T) {
+	t.Setenv("WHATSAPP_STORE_DIR", "relative/store")
+	got := storeDir()
+	if !filepath.IsAbs(got) || filepath.Base(got) != "store" {
+		t.Fatalf("storeDir() = %q, want an absolute path ending in relative/store", got)
+	}
+}
+
 func TestNewMessageStoreHonorsStoreDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "custom store")
 	t.Setenv("WHATSAPP_STORE_DIR", dir)
