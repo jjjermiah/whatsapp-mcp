@@ -24,7 +24,6 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/mdp/qrterminal"
 
 	"bytes"
 
@@ -3185,11 +3184,11 @@ func main() {
 				continue
 			}
 
-			// Print QR codes for pairing with the phone.
-			switch renderPairingQRCodes(qrChan, os.Stdout, func(code string, w io.Writer) {
-				qrterminal.GenerateHalfBlock(code, qrterminal.L, w)
-			}) {
+			// Print QR codes for pairing with the phone; each is also written
+			// to a PNG (pairing.go).
+			switch renderPairingQRCodes(qrChan, os.Stdout, newQRRenderer()) {
 			case pairingQRSucceeded:
+				removeQRPNG()
 				connected <- true
 			case pairingQRTimedOut:
 				logger.Warnf("QR code timed out")

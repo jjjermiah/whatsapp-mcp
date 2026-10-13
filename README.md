@@ -475,6 +475,7 @@ Copy `.env.example` to `.env` and configure as needed:
 | `WHATSAPP_BRIDGE_TOKEN` | generated next to `WHATSMEOW_DB_PATH` as `.bridge-token` | Bearer token for bridge REST calls; also signed onto outbound webhook POSTs |
 | `WHATSAPP_MEDIA_ROOTS` | `~/.local/share/whatsapp-mcp/outbox`     | Path-list of directories allowed for outbound media files |
 | `WHATSAPP_DEVICE_NAME` | `whatsmeow` (whatsmeow default)          | Label shown for this connection under WhatsApp > Linked Devices. Set to a recognisable name. Applies at pair time only (re-pair to change) |
+| `WHATSAPP_QR_PNG_PATH` | `store/qr.png`                           | Where the bridge writes the pairing QR as a PNG (also drawn in the terminal). Deleted once pairing succeeds |
 | `WHATSAPP_MCP_TRANSPORT` | `stdio`                                | MCP transport to serve clients: `stdio`, `http`, or `sse` |
 | `WHATSAPP_MCP_HOST`    | `127.0.0.1`                              | Bind address for the `http`/`sse` transports |
 | `WHATSAPP_MCP_PORT`    | `8000`                                   | Port for the `http`/`sse` transports |
@@ -1025,6 +1026,10 @@ are documented in [docs/RELEASING.md](docs/RELEASING.md).
   supported linked-device client version, which can make older whatsmeow builds
   fail before pairing completes.
 - **QR Code Not Displaying**: Restart the bridge. Check terminal QR code support.
+- **QR Code Displays but the phone will not scan it**: Some terminals add line
+  spacing that breaks the half-block drawing. The bridge also writes each code
+  to `store/qr.png` (override with `WHATSAPP_QR_PNG_PATH`); open that file and
+  scan it instead. It is deleted once pairing succeeds.
 - **Phone says "check your connection" after scanning**: WhatsApp answers a scan
   with a `companion_reg_refresh` notification, whatsmeow rotates the pairing
   secret, and the bridge prints a **new** QR code marked `QR code refreshed`.
