@@ -14,6 +14,11 @@ import (
 	"time"
 )
 
+// maxSendMinIntervalMS caps WHATSAPP_SEND_MIN_INTERVAL_MS. The REST server's
+// WriteTimeout is 60s, and a send waits out the interval before it starts, so
+// a larger value makes paced sends time out on the client side.
+const maxSendMinIntervalMS = 30000
+
 type sendPacer struct {
 	mu          sync.Mutex
 	minInterval time.Duration
@@ -39,6 +44,16 @@ func newSendPacerFromEnv() *sendPacer {
 		return newSendPacer(0)
 	}
 	return newSendPacer(time.Duration(ms) * time.Millisecond)
+}
+
+// validateSendMinInterval rejects a WHATSAPP_SEND_MIN_INTERVAL_MS above the
+// cap. Unparseable values are left to newSendPacerFromEnv (warn, no pacing).
+func validateSendMinInterval() error {
+	raw := strings.TrimSpace(os.Getenv("WHATSAPP_SEND_MIN_INTERVAL_MS"))
+	if ms, err := strconv.Atoi(raw); err == nil && ms > maxSendMinIntervalMS {
+		return fmt.Errorf("WHATSAPP_SEND_MIN_INTERVAL_MS=%d is above the %d ms maximum (a paced send must finish within the 60s HTTP write timeout)", ms, maxSendMinIntervalMS)
+	}
+	return nil
 }
 
 // Wait blocks until at least minInterval has passed since the previous send

@@ -129,3 +129,24 @@ func TestNewSendPacerFromEnv(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateSendMinInterval(t *testing.T) {
+	cases := []struct {
+		env     string
+		wantErr bool
+	}{
+		{"", false},
+		{"0", false},
+		{"30000", false},
+		{"30001", true},
+		{"40000", true},
+		{"soon", false}, // unparseable: newSendPacerFromEnv warns and disables pacing
+		{"-5", false},
+	}
+	for _, tc := range cases {
+		t.Setenv("WHATSAPP_SEND_MIN_INTERVAL_MS", tc.env)
+		if err := validateSendMinInterval(); (err != nil) != tc.wantErr {
+			t.Errorf("WHATSAPP_SEND_MIN_INTERVAL_MS=%q: err = %v, wantErr %v", tc.env, err, tc.wantErr)
+		}
+	}
+}
