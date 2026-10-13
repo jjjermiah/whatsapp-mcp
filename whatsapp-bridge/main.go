@@ -1366,7 +1366,11 @@ func handleMessageRevoke(messageStore *MessageStore, msg *waProto.Message, chatJ
 // for personal chats before sending.
 func resolveRecipientJID(client *whatsmeow.Client, recipient string) (types.JID, error) {
 	var recipientJID types.JID
-	var err error
+
+	recipient, err := normalizeRecipient(recipient)
+	if err != nil {
+		return types.JID{}, err
+	}
 
 	if strings.Contains(recipient, "@") {
 		recipientJID, err = types.ParseJID(recipient)
@@ -2433,6 +2437,10 @@ func newRESTMux(client *whatsmeow.Client, messageStore *MessageStore, port int, 
 			http.Error(w, "Recipient is required", http.StatusBadRequest)
 			return
 		}
+		var ok bool
+		if req.Recipient, ok = normalizeOrReject(w, req.Recipient); !ok {
+			return
+		}
 
 		if req.Message == "" && req.MediaPath == "" {
 			http.Error(w, "Message or media path is required", http.StatusBadRequest)
@@ -2495,6 +2503,15 @@ func newRESTMux(client *whatsmeow.Client, messageStore *MessageStore, port int, 
 		if req.ChatJID == "" || len(req.MessageIDs) == 0 {
 			http.Error(w, "chat_jid and message_ids are required", http.StatusBadRequest)
 			return
+		}
+		var ok bool
+		if req.ChatJID, ok = normalizeOrReject(w, req.ChatJID); !ok {
+			return
+		}
+		if req.SenderJID != "" {
+			if req.SenderJID, ok = normalizeOrReject(w, req.SenderJID); !ok {
+				return
+			}
 		}
 
 		messageIDs := make([]types.MessageID, len(req.MessageIDs))
@@ -2599,6 +2616,10 @@ func newRESTMux(client *whatsmeow.Client, messageStore *MessageStore, port int, 
 		var req ReactRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Recipient == "" || req.MessageID == "" || req.Emoji == nil {
 			http.Error(w, "recipient, message_id, and emoji are required", http.StatusBadRequest)
+			return
+		}
+		var ok bool
+		if req.Recipient, ok = normalizeOrReject(w, req.Recipient); !ok {
 			return
 		}
 		chatJID, err := types.ParseJID(req.Recipient)
@@ -2726,6 +2747,10 @@ func newRESTMux(client *whatsmeow.Client, messageStore *MessageStore, port int, 
 		// Validate request
 		if req.Recipient == "" {
 			http.Error(w, "Recipient is required", http.StatusBadRequest)
+			return
+		}
+		var ok bool
+		if req.Recipient, ok = normalizeOrReject(w, req.Recipient); !ok {
 			return
 		}
 

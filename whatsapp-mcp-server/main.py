@@ -341,7 +341,8 @@ def send_message(
     """Send a WhatsApp message to a person or group. For group chats use the JID.
 
     Args:
-        recipient: The recipient - either a phone number with country code but no + or other symbols,
+        recipient: The recipient - either ONE phone number with country code ("+", spaces and dashes
+                 are stripped; no country-code guessing, no lists of numbers),
                  or a JID (e.g., "123456789@s.whatsapp.net" or a group JID like "123456789@g.us")
         message: The message text to send
         quoted_message_id: ID of the message to reply to (optional). When set, the sent
@@ -429,7 +430,7 @@ def send_file(recipient: str, media_path: str, caption: str = "") -> dict[str, A
     needing a separate follow-up send_message call. For group chats use the JID.
 
     Args:
-        recipient: Either a phone number with country code (no + or symbols),
+        recipient: Either ONE phone number with country code ("+", spaces and dashes are stripped),
                  or a JID (e.g., "123456789@s.whatsapp.net" or "123456789@g.us")
         media_path: Absolute path to the media file (image, video, document)
         caption: Optional text rendered with the file as a caption. Omit for a
@@ -449,8 +450,8 @@ def send_audio_message(recipient: str, media_path: str) -> dict[str, Any]:
     """Send any audio file as a WhatsApp audio message to the specified recipient. For group messages use the JID. If it errors due to ffmpeg not being installed, use send_file instead.
 
     Args:
-        recipient: The recipient - either a phone number with country code but no + or other symbols,
-                 or a JID (e.g., "123456789@s.whatsapp.net" or a group JID like "123456789@g.us")
+        recipient: The recipient - either ONE phone number with country code ("+", spaces and dashes
+                 are stripped), or a JID (e.g., "123456789@s.whatsapp.net" or a group JID like "123456789@g.us")
         media_path: The absolute path to the audio file to send (will be converted to Opus .ogg if it's not a .ogg file)
 
     Returns:

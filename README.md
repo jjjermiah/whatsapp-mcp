@@ -186,7 +186,7 @@ Send a text message to a contact or group, optionally as a quoted reply.
 
 **Parameters:**
 
-- `recipient` (required): Phone number or group JID
+- `recipient` (required): One phone number with country code (a leading `+`, spaces, dashes, dots and parentheses are stripped), or a JID. The bridge never guesses a country code: a number with 10 or fewer digits, or input holding more than one number (`a / b`, `a, b`), fails with HTTP 400 `invalid_recipient` before anything is sent
 - `message` (required): Text content to send
 - `quoted_message_id` (optional): ID of the message to reply to. When provided, the sent message appears as a quoted reply in WhatsApp.
 - `quoted_sender_jid` (optional): Full JID of the author of the quoted message. Required for group replies so WhatsApp renders the correct attribution header.
