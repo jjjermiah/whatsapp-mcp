@@ -9,6 +9,7 @@ from typing import Any
 import requests
 
 import audio
+from markdown_format import format_outgoing
 
 # Configuration via environment variables with sensible defaults
 _DEFAULT_BRIDGE_STORE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "whatsapp-bridge", "store")
@@ -1069,7 +1070,7 @@ def send_message(
         url = f"{WHATSAPP_API_BASE_URL}/send"
         payload: dict[str, Any] = {
             "recipient": recipient,
-            "message": message,
+            "message": format_outgoing(message),
         }
         if quoted_message_id:
             payload["quoted_message_id"] = quoted_message_id
@@ -1118,7 +1119,7 @@ def send_file(recipient: str, media_path: str, caption: str = "") -> tuple[bool,
         url = f"{WHATSAPP_API_BASE_URL}/send"
         payload = {"recipient": recipient, "media_path": media_path}
         if caption:
-            payload["message"] = caption
+            payload["message"] = format_outgoing(caption)
 
         response = requests.post(url, json=payload, headers=_bridge_headers())
 

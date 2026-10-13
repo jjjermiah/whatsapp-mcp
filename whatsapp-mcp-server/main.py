@@ -392,7 +392,10 @@ def send_message(
         recipient: The recipient - either ONE phone number with country code ("+", spaces and dashes
                  are stripped; no country-code guessing, no lists of numbers),
                  or a JID (e.g., "123456789@s.whatsapp.net" or a group JID like "123456789@g.us")
-        message: The message text to send
+        message: The message text to send. WhatsApp formatting is *bold*, _italic_, ~strike~,
+                 `mono` and ```code blocks```; write it natively. Markdown **bold**, __bold__,
+                 ~~strike~~, # headings and [text](url) links are converted automatically
+                 (WHATSAPP_MARKDOWN_CONVERT=0 turns that off).
         quoted_message_id: ID of the message to reply to (optional). When set, the sent
                            message will appear as a quoted reply in WhatsApp.
         quoted_sender_jid: Full JID of the author of the quoted message. Required for
@@ -482,7 +485,8 @@ def send_file(recipient: str, media_path: str, caption: str = "") -> dict[str, A
                  or a JID (e.g., "123456789@s.whatsapp.net" or "123456789@g.us")
         media_path: Absolute path to the media file (image, video, document)
         caption: Optional text rendered with the file as a caption. Omit for a
-                 bare attachment.
+                 bare attachment. Same formatting as send_message: *bold*, _italic_,
+                 ~strike~; Markdown is converted.
 
     Returns:
         A dictionary containing success status and a status message

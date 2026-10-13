@@ -206,7 +206,7 @@ Send a text message to a contact or group, optionally as a quoted reply.
 **Parameters:**
 
 - `recipient` (required): One phone number with country code (a leading `+`, spaces, dashes, dots and parentheses are stripped), or a JID. The bridge never guesses a country code: a number with 10 or fewer digits, or input holding more than one number (`a / b`, `a, b`), fails with HTTP 400 `invalid_recipient` before anything is sent
-- `message` (required): Text content to send
+- `message` (required): Text content to send. WhatsApp formats `*bold*`, `_italic_`, `~strike~`, `` `mono` `` and ` ```code blocks``` `. Markdown `**bold**`, `__bold__`, `~~strike~~`, `# headings` and `[text](url)` links are converted automatically (`*x*`, `~x~`, `*Heading*`, `text (url)`); code spans and fences and single `*x*`/`_x_` are left alone. Set `WHATSAPP_MARKDOWN_CONVERT=0` to disable
 - `quoted_message_id` (optional): ID of the message to reply to. When provided, the sent message appears as a quoted reply in WhatsApp.
 - `quoted_sender_jid` (optional): Full JID of the author of the quoted message. Required for group replies so WhatsApp renders the correct attribution header.
 - `quoted_content` (optional): Text content of the quoted message, used for the reply preview. Only plain text is supported.
@@ -507,6 +507,7 @@ Copy `.env.example` to `.env` and configure as needed:
 | `WHATSAPP_BRIDGE_TOKEN` | generated next to `WHATSMEOW_DB_PATH` as `.bridge-token` | Bearer token for bridge REST calls; also signed onto outbound webhook POSTs |
 | `WHATSAPP_MEDIA_ROOTS` | `~/.local/share/whatsapp-mcp/outbox`     | Path-list of directories allowed for outbound media files |
 | `WHATSAPP_SEND_MIN_INTERVAL_MS` | `0` (off)                          | Minimum milliseconds between outbound sends from the bridge. Concurrent sends queue instead of failing, so each send may take that long to return. `10000`-`30000` suits bulk sends to people who have never messaged the account |
+| `WHATSAPP_MARKDOWN_CONVERT` | `1` (on)                           | Convert Markdown in `send_message`/`send_file` text to WhatsApp formatting. `0`/`false`/`no`/`off` sends text verbatim |
 | `WHATSAPP_DEVICE_NAME` | `whatsmeow` (whatsmeow default)          | Label shown for this connection under WhatsApp > Linked Devices. Set to a recognisable name. Applies at pair time only (re-pair to change) |
 | `WHATSAPP_MCP_TRANSPORT` | `stdio`                                | MCP transport to serve clients: `stdio`, `http`, or `sse` |
 | `WHATSAPP_MCP_HOST`    | `127.0.0.1`                              | Bind address for the `http`/`sse` transports |

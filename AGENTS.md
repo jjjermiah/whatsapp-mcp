@@ -103,6 +103,7 @@ A failing blocking job is a hard block — fix it or explain in the PR why it's 
 | `WHATSAPP_BRIDGE_TOKEN` | generated next to `WHATSMEOW_DB_PATH` as `.bridge-token` | Bearer token required for bridge REST calls |
 | `WHATSAPP_MEDIA_ROOTS` | `~/.local/share/whatsapp-mcp/outbox` | Path-list of directories allowed for outbound media files |
 | `WHATSAPP_SEND_MIN_INTERVAL_MS` | `0` (off) | Minimum milliseconds between outbound text/media/audio sends from the bridge. Concurrent sends queue (wait, not reject), so `/api/send` may take that long to answer. `10000`-`30000` suits bulk sends to people who have never messaged the account |
+| `WHATSAPP_MARKDOWN_CONVERT` | `1` (on) | MCP server rewrites Markdown (`**bold**`, `__bold__`, `~~strike~~`, `# heading`, `[text](url)`) into WhatsApp syntax in `send_message` text and `send_file` captions; code spans and fences are left alone. `0`/`false`/`no`/`off` sends text verbatim |
 | `WHATSAPP_DEVICE_NAME` | `whatsmeow` (whatsmeow default) | Linked-device label shown in WhatsApp > Linked Devices. Applied at pair time only (`store.DeviceProps.Os`); re-pair to change |
 | `WHATSAPP_MCP_TRANSPORT` | `stdio` | MCP transport to serve clients: `stdio`, `http`, or `sse` |
 | `WHATSAPP_MCP_HOST` | `127.0.0.1` | Bind address for the `http`/`sse` transports |
@@ -137,6 +138,7 @@ When adding a new env var: document it here, in `README.md`, and in `.env.exampl
 |---|---|
 | Add or modify an MCP tool | `whatsapp-mcp-server/main.py` |
 | Change DB queries / data conversion | `whatsapp-mcp-server/whatsapp.py` |
+| Change Markdown → WhatsApp text conversion | `whatsapp-mcp-server/markdown_format.py` |
 | Change bridge REST API or event handling | `whatsapp-bridge/main.go` |
 | Change webhook payload | `whatsapp-bridge/webhook.go` |
 | Change CI behavior | `.github/workflows/*.yml` |
