@@ -23,6 +23,9 @@ from whatsapp import (
     check_whatsapp as whatsapp_check_whatsapp,
 )
 from whatsapp import (
+    delete_message as whatsapp_delete_message,
+)
+from whatsapp import (
     download_media as whatsapp_download_media,
 )
 from whatsapp import (
@@ -33,6 +36,9 @@ from whatsapp import (
 )
 from whatsapp import (
     get_direct_chat_by_contact as whatsapp_get_direct_chat_by_contact,
+)
+from whatsapp import (
+    get_group_participants as whatsapp_get_group_participants,
 )
 from whatsapp import (
     get_last_interaction as whatsapp_get_last_interaction,
@@ -335,6 +341,24 @@ def get_direct_chat_by_contact(sender_phone_number: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def get_group_participants(chat_jid: str) -> dict[str, Any]:
+    """Get a group's name and its full member list, fetched live from WhatsApp.
+
+    The local database only knows group members who have sent a message, so use
+    this to see who is really in a group. Requires the bridge to be running.
+
+    Args:
+        chat_jid: The group JID (e.g., "123456789@g.us")
+
+    Returns:
+        {"success": True, "jid", "name" (group subject), "participants": [{"jid", "phone"
+        (None if the member is only known by LID), "name" (contact name, None if unknown),
+        "is_admin", "is_super_admin"}]}, or {"success": False, "message": ...}
+    """
+    return whatsapp_get_group_participants(chat_jid)
+
+
+@mcp.tool()
 def get_contact_chats(jid: str, limit: int = 20, page: int = 0) -> list[dict[str, Any]]:
     """Get all WhatsApp chats involving the contact.
 
@@ -445,6 +469,26 @@ def send_reaction(
         A dictionary containing success status and a status message
     """
     success, status_message = whatsapp_send_reaction(recipient, message_id, emoji, from_me, sender_jid)
+    return {"success": success, "message": status_message}
+
+
+@mcp.tool()
+def delete_message(chat_jid: str, message_id: str) -> dict[str, Any]:
+    """Delete a message you sent for everyone in the chat ("Delete for everyone").
+
+    This is irreversible: the message disappears for all recipients and cannot be
+    restored. Only messages sent by this account can be deleted, and the message
+    must exist in the local database. Use list_messages to find the message ID.
+
+    Args:
+        chat_jid: JID of the chat containing the message (e.g., "12025551234@s.whatsapp.net"
+                  or a group JID like "123456789@g.us")
+        message_id: ID of the message to delete
+
+    Returns:
+        A dictionary containing success status and a status message
+    """
+    success, status_message = whatsapp_delete_message(chat_jid, message_id)
     return {"success": success, "message": status_message}
 
 

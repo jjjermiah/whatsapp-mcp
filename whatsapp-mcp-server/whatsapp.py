@@ -1319,6 +1319,95 @@ def send_reaction(
         return False, f"Unexpected error: {str(e)}"
 
 
+def delete_message(chat_jid: str, message_id: str) -> tuple[bool, str]:
+    """Delete a message this account sent, for everyone in the chat.
+
+    Args:
+        chat_jid: The chat JID the message belongs to.
+        message_id: The ID of the message to delete.
+
+    Returns:
+        Tuple of (success, status_message).
+    """
+    try:
+        if not chat_jid:
+            return False, "Chat JID must be provided"
+        if not message_id:
+            return False, "Message ID must be provided"
+
+        response = requests.post(
+            f"{WHATSAPP_API_BASE_URL}/revoke",
+            json={"chat_jid": chat_jid, "message_id": message_id},
+            headers=_bridge_headers(),
+        )
+
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("ok"):
+                return True, "Message deleted for everyone"
+            return False, result.get("error", "Unknown error")
+        return False, _http_error(response)
+
+    except requests.ConnectionError:
+        return False, _bridge_unreachable_message()
+    except requests.RequestException as e:
+        return False, f"Request error: {str(e)}"
+    except json.JSONDecodeError:
+        return False, f"Error parsing response: {response.text}"
+    except Exception as e:
+        return False, f"Unexpected error: {str(e)}"
+
+
+def get_group_participants(chat_jid: str) -> dict[str, Any]:
+    """Fetch a group's name and full member list live from WhatsApp via the bridge.
+
+    Returns {"success": True, "jid", "name", "participants": [{jid, phone, name,
+    is_admin, is_super_admin}]} or {"success": False, "message": ...}. `name` is
+    the contact name when known, else None; `phone` is None for members the
+    bridge only knows by LID.
+    """
+    try:
+        if not chat_jid.endswith("@g.us"):
+            return {"success": False, "message": "chat_jid must be a group JID (ending in @g.us)"}
+
+        response = requests.get(
+            f"{WHATSAPP_API_BASE_URL}/group-info",
+            params={"jid": chat_jid},
+            headers=_bridge_headers(),
+        )
+        if response.status_code != 200:
+            return {"success": False, "message": _http_error(response)}
+
+        info = response.json()
+        participants = []
+        for p in info.get("participants", []):
+            name = get_sender_name(p["jid"])
+            participants.append(
+                {
+                    "jid": p["jid"],
+                    "phone": p.get("phone"),
+                    "name": None if name == p["jid"] else name,
+                    "is_admin": p.get("is_admin", False),
+                    "is_super_admin": p.get("is_super_admin", False),
+                }
+            )
+        return {
+            "success": True,
+            "jid": info.get("jid", chat_jid),
+            "name": info.get("name", ""),
+            "participants": participants,
+        }
+
+    except requests.ConnectionError:
+        return {"success": False, "message": _bridge_unreachable_message()}
+    except requests.RequestException as e:
+        return {"success": False, "message": f"Request error: {str(e)}"}
+    except json.JSONDecodeError:
+        return {"success": False, "message": f"Error parsing response: {response.text}"}
+    except Exception as e:
+        return {"success": False, "message": f"Unexpected error: {str(e)}"}
+
+
 def mark_messages_read(
     message_ids: list[str],
     chat_jid: str,

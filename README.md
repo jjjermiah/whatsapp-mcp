@@ -250,7 +250,7 @@ Send (or remove) an emoji reaction to a message.
 - `from_me` (optional, default `false`): Whether the original message was sent by the current user
 - `sender_jid` (optional): Full JID of the original message sender — required for group messages when `from_me` is `false` so the correct WhatsApp key is built
 
-Inbound reactions received from others are stored automatically as messages with `media_type = "reaction"`. The `reaction_to_message_id` field in each reaction message indicates which message was reacted to.
+Inbound reactions received from others are stored automatically as messages with `media_type = "reaction"`. The `reaction_to_message_id` field in each reaction message indicates which message was reacted to. Reactions you send (or remove) through `send_reaction` are stored the same way, with `is_from_me = true`, so "who spoke last" checks see them. A removal is stored with empty content.
 
 When webhook forwarding is enabled, inbound reactions are also posted to `WEBHOOK_URL` as typed events. Reaction removals use an empty `content`/`reactionEmoji` and `reactionRemoved: true`.
 
@@ -273,6 +273,23 @@ When webhook forwarding is enabled, inbound reactions are also posted to `WEBHOO
 
 - "React to that message with a thumbs up"
 - "Remove my reaction from the last message in the group chat"
+
+#### `delete_message`
+
+Delete a message you sent **for everyone** in the chat (WhatsApp's "Delete for
+everyone"). This is irreversible. Only messages sent by this account can be
+deleted, and the message must be in the local database (`POST /api/revoke`
+returns 404 otherwise, 403 for someone else's message). On success the local row
+is stamped with `deleted_at`; its content is kept for the archive.
+
+**Parameters:**
+
+- `chat_jid` (required): JID of the chat containing the message
+- `message_id` (required): ID of the message to delete (see `list_messages`)
+
+**Natural Language Examples:**
+
+- "Unsend the message I just sent to Alice by mistake"
 
 #### `send_file`
 
@@ -489,6 +506,24 @@ Get messages around a specific message for context.
 - `chat_jid` (required): JID of the chat
 - `before` (optional): Number of messages before (default 5)
 - `after` (optional): Number of messages after (default 5)
+
+#### `get_group_participants`
+
+Get a group's name and its full member list, fetched live from WhatsApp through
+the bridge (`GET /api/group-info`). The local database only knows members who
+have sent a message.
+
+**Parameters:**
+
+- `chat_jid` (required): Group JID (ending in `@g.us`)
+
+Returns `jid`, `name` (the group subject) and `participants`, each with `jid`,
+`phone` (`null` for members only known by LID), `name` (contact name, `null` if
+unknown), `is_admin` and `is_super_admin`.
+
+**Natural Language Examples:**
+
+- "Who is in the wedding planning group?"
 
 ## Configuration
 
@@ -932,6 +967,26 @@ Caveats:
   message first.
 - Messages the phone has deleted are not recoverable, as above.
 
+### Listing a group's members
+
+`messages.db` only knows the members of a group who have sent something. To get
+the full member list, fetched live from WhatsApp (the `get_group_participants`
+tool wraps this):
+
+```bash
+curl "http://127.0.0.1:8080/api/group-info?jid=120363000000000000@g.us" \
+  -H "Authorization: Bearer $(cat whatsapp-bridge/store/.bridge-token)"
+```
+
+```json
+{"jid": "120363000000000000@g.us", "name": "Family",
+ "participants": [{"jid": "15555550100@s.whatsapp.net", "phone": "15555550100", "is_admin": true, "is_super_admin": false}]}
+```
+
+Members are resolved from LID to their phone-number JID where the bridge knows
+it. A member known only by LID keeps the `@lid` JID and has no `phone`. Each call
+makes one live request to WhatsApp, so cache the result rather than polling.
+
 ## Call History
 
 The bridge captures incoming WhatsApp voice and video calls live into a
@@ -1019,12 +1074,14 @@ flowchart LR
         READ["/api/mark-read"]
         DOWN["/api/download"]
         REACT["/api/react"]
+        REVOKE["/api/revoke"]
         TYPE["/api/typing"]
         HIST["/api/history"]
+        GINFO["/api/group-info"]
         HEALTH["/api/health"]
     end
 
-    subgraph MCPTools["MCP Tools (19 total)"]
+    subgraph MCPTools["MCP Tools (21 total)"]
         direction TB
         CONT["Contact Tools<br/>search_contacts, get_contact, check_whatsapp"]
         MSG["Message Tools<br/>list_messages, send_message, etc."]

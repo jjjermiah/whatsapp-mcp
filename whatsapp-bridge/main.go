@@ -2425,6 +2425,12 @@ func newRESTMux(client *whatsmeow.Client, messageStore *MessageStore, port int, 
 	// POST /api/check: is this number on WhatsApp? (see check.go)
 	registerCheckEndpoint(mux, auth, client)
 
+	// Delete-for-everyone endpoint (see revoke.go)
+	registerRevokeEndpoint(mux, auth, client, messageStore)
+
+	// Group members endpoint (see group_info.go)
+	registerGroupInfoEndpoint(mux, auth, client)
+
 	// Health check endpoint
 	mux.HandleFunc("/api/health", auth(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -2688,11 +2694,13 @@ func newRESTMux(client *whatsmeow.Client, messageStore *MessageStore, port int, 
 		}
 		msg := client.BuildReaction(chatJID, senderJID, req.MessageID, *req.Emoji)
 		w.Header().Set("Content-Type", "application/json")
-		if _, err := client.SendMessage(context.Background(), chatJID, msg); err != nil {
+		resp, err := client.SendMessage(context.Background(), chatJID, msg)
+		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
+		storeSentReaction(client, messageStore, chatJID, req.MessageID, *req.Emoji, resp)
 		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 	}))
 

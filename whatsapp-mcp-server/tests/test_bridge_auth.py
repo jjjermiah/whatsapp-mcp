@@ -101,6 +101,7 @@ def test_send_message_without_token_surfaces_bridge_401(monkeypatch, tmp_path):
         ("download_media", ("msg-id", "12025551234@s.whatsapp.net"), "/download"),
         ("send_reaction", ("12025551234@s.whatsapp.net", "3AABCDEF01234567", "👍"), "/react"),
         ("mark_messages_read", (["3AABCDEF01234567"], "12025551234@s.whatsapp.net"), "/mark-read"),
+        ("delete_message", ("12025551234@s.whatsapp.net", "3AABCDEF01234567"), "/revoke"),
     ],
 )
 def test_bridge_post_helpers_include_auth_headers(monkeypatch, tmp_path, func_name, args, expected_suffix):
@@ -182,6 +183,92 @@ def test_send_reaction_missing_message_id_returns_error():
     success, msg = whatsapp.send_reaction("12025551234@s.whatsapp.net", "", "👍")
     assert success is False
     assert "Message ID" in msg
+
+
+def test_delete_message_posts_payload_and_reports_bridge_errors(monkeypatch):
+    calls = []
+    responses = [
+        DummyResponse(payload={"ok": True}),
+        DummyResponse(status_code=403, text="only messages sent by this account can be deleted"),
+    ]
+    monkeypatch.setenv("WHATSAPP_BRIDGE_TOKEN", "test-token")
+
+    def fake_post(url, json, headers=None):
+        calls.append({"url": url, "json": json})
+        return responses.pop(0)
+
+    monkeypatch.setattr(whatsapp.requests, "post", fake_post)
+
+    ok, _ = whatsapp.delete_message("12025551234@s.whatsapp.net", "3AABCDEF01234567")
+    denied, message = whatsapp.delete_message("12025551234@s.whatsapp.net", "3ATHEIRS")
+
+    assert ok is True
+    assert calls[0]["json"] == {"chat_jid": "12025551234@s.whatsapp.net", "message_id": "3AABCDEF01234567"}
+    assert denied is False
+    assert "HTTP 403" in message
+
+
+@pytest.mark.parametrize(("chat_jid", "message_id"), [("", "3A1"), ("12025551234@s.whatsapp.net", "")])
+def test_delete_message_validates_input(chat_jid, message_id):
+    success, _ = whatsapp.delete_message(chat_jid, message_id)
+
+    assert success is False
+
+
+def test_get_group_participants_calls_bridge_and_adds_contact_names(monkeypatch):
+    calls = []
+    monkeypatch.setenv("WHATSAPP_BRIDGE_TOKEN", "test-token")
+    group = "120363000000000000@g.us"
+    payload = {
+        "jid": group,
+        "name": "Family",
+        "participants": [
+            {"jid": "15555550100@s.whatsapp.net", "phone": "15555550100", "is_admin": True, "is_super_admin": False},
+            {"jid": "987654321@lid", "is_admin": False, "is_super_admin": False},
+        ],
+    }
+
+    def fake_get(url, params=None, headers=None):
+        calls.append({"url": url, "params": params, "headers": headers})
+        return DummyResponse(payload=payload)
+
+    monkeypatch.setattr(whatsapp.requests, "get", fake_get)
+    monkeypatch.setattr(whatsapp, "get_sender_name", lambda jid: "Alice" if jid.startswith("1555") else jid)
+
+    result = whatsapp.get_group_participants(group)
+
+    assert calls == [
+        {
+            "url": f"{whatsapp.WHATSAPP_API_BASE_URL}/group-info",
+            "params": {"jid": group},
+            "headers": {"Authorization": "Bearer test-token"},
+        }
+    ]
+    assert result["success"] is True
+    assert result["name"] == "Family"
+    assert result["participants"] == [
+        {
+            "jid": "15555550100@s.whatsapp.net",
+            "phone": "15555550100",
+            "name": "Alice",
+            "is_admin": True,
+            "is_super_admin": False,
+        },
+        {"jid": "987654321@lid", "phone": None, "name": None, "is_admin": False, "is_super_admin": False},
+    ]
+
+
+def test_get_group_participants_rejects_non_group_and_surfaces_bridge_errors(monkeypatch):
+    assert whatsapp.get_group_participants("15555550100@s.whatsapp.net")["success"] is False
+
+    monkeypatch.setattr(
+        whatsapp.requests, "get", lambda *a, **k: DummyResponse(status_code=502, text="Failed to get group info")
+    )
+
+    result = whatsapp.get_group_participants("120363000000000000@g.us")
+
+    assert result["success"] is False
+    assert "HTTP 502" in result["message"]
 
 
 def test_mark_messages_read_posts_correct_payload(monkeypatch):
