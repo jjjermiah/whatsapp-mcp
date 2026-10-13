@@ -15,10 +15,16 @@ import (
 // numbers run together.
 const maxPhoneDigits = 15
 
-// minPhoneDigitsWithCountryCode: numbers with this many digits or fewer are
-// treated as national numbers (no country code). The bridge never guesses a
+// minPhoneDigitsBare: bare digits (no "+" or "00" prefix) need at least this
+// many to count as carrying a country code; ten or fewer look like a national
+// number, e.g. a NANP number missing its leading 1. The bridge never guesses a
 // country code.
-const minPhoneDigitsWithCountryCode = 10
+const minPhoneDigitsBare = 11
+
+// minPhoneDigitsExplicit: when the caller marked the country code with a
+// leading "+" or "00", accept the shortest real E.164 numbers (Denmark and
+// Singapore are 10 digits including the country code).
+const minPhoneDigitsExplicit = 8
 
 // Stable error codes returned in the "error" field of failed requests.
 const (
@@ -47,6 +53,8 @@ func invalidRecipient(msg string) *recipientError {
 // Accepted noise: leading apostrophe/quote (CSV/spreadsheet text marker), "+",
 // whitespace, dashes, dots and parentheses. Input that holds more than one
 // number ("a / b", "a, b") or is too short to carry a country code is rejected.
+// A leading "+" or "00" is an explicit country-code marker: such input needs
+// only 8-15 digits (the "00" is dropped). Bare digits need at least 11.
 func normalizeRecipient(input string) (string, error) {
 	s := strings.TrimSpace(input)
 	if strings.Contains(s, "@") {
@@ -72,16 +80,24 @@ func normalizeRecipient(input string) (string, error) {
 		}
 	}
 
-	n := digits.Len()
+	d := digits.String()
+	explicit := strings.HasPrefix(s, "+") || strings.HasPrefix(d, "00")
+	if explicit {
+		d = strings.TrimPrefix(d, "00")
+	}
+
+	n := len(d)
 	switch {
-	case n == 0:
+	case digits.Len() == 0:
 		return "", invalidRecipient(fmt.Sprintf("recipient %s has no digits", strconv.Quote(input)))
-	case n <= minPhoneDigitsWithCountryCode:
-		return "", invalidRecipient(fmt.Sprintf("recipient %s has no country code (only %d digits); include it, e.g. 16476698464 for a Canadian number", strconv.Quote(input), n))
+	case explicit && n < minPhoneDigitsExplicit:
+		return "", invalidRecipient(fmt.Sprintf("recipient %s has only %d digits after the country-code marker; too short for a phone number", strconv.Quote(input), n))
+	case !explicit && n < minPhoneDigitsBare:
+		return "", invalidRecipient(fmt.Sprintf("recipient %s has no country code (only %d digits); include it, e.g. 16476698464 for a Canadian number, or write it with a leading + or 00", strconv.Quote(input), n))
 	case n > maxPhoneDigits:
 		return "", invalidRecipient(fmt.Sprintf("recipient %s has %d digits, more than the %d a phone number can have; it may contain more than one number", strconv.Quote(input), n, maxPhoneDigits))
 	}
-	return digits.String(), nil
+	return d, nil
 }
 
 // writeSendError answers a failed request with

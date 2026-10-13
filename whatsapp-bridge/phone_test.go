@@ -24,6 +24,10 @@ func TestNormalizeRecipient(t *testing.T) {
 		{"surrounding whitespace", "  16476698464\n", "16476698464", ""},
 		{"11 digits", "12345678901", "12345678901", ""},
 		{"15 digits max", "123456789012345", "123456789012345", ""},
+		{"short E.164 with plus (Denmark)", "+4512345678", "4512345678", ""},
+		{"short E.164 with 00 (Denmark)", "004512345678", "4512345678", ""},
+		{"short E.164 formatted (Singapore)", "+65 8123 4567", "6581234567", ""},
+		{"8 digits with plus", "+12345678", "12345678", ""},
 
 		{"phone jid untouched", "16476698464@s.whatsapp.net", "16476698464@s.whatsapp.net", ""},
 		{"group jid untouched", "120363012345678901@g.us", "120363012345678901@g.us", ""},
@@ -39,7 +43,12 @@ func TestNormalizeRecipient(t *testing.T) {
 		{"national number no country code", "6474571760", "", "country code"},
 		{"formatted national number", "(647) 457-1760", "", "country code"},
 		{"short", "12345", "", "country code"},
+		{"bare 10 digits looks national", "4512345678", "", "country code"},
+		{"bare NANP missing 1", "6476698464", "", "country code"},
+		{"plus too short", "+1234567", "", "too short"},
+		{"00 too short", "001234567", "", "too short"},
 		{"too long", "1234567890123456", "", "more than the 15"},
+		{"too long with plus", "+1234567890123456", "", "more than the 15"},
 
 		{"empty", "", "", "empty"},
 		{"whitespace only", "   ", "", "empty"},
