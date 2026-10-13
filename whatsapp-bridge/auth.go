@@ -37,10 +37,10 @@ import (
 // tokenFileMode is read/write for owner only — never group/other readable.
 const tokenFileMode = 0o600
 
-// tokenFilePath is the on-disk location of the bridge auth token, relative
-// to the bridge's working directory. The MCP server reads this file as a
+// tokenFilePath is the on-disk location of the bridge auth token, inside the
+// store directory (see storeDir). The MCP server reads this file as a
 // fallback when WHATSAPP_BRIDGE_TOKEN is unset.
-const tokenFilePath = "store/.bridge-token"
+func tokenFilePath() string { return storePath(".bridge-token") }
 
 // tokenByteLen is the entropy size of generated tokens. 32 bytes (256 bits)
 // is overkill for an HMAC-quality secret on a single host but trivial to
@@ -59,14 +59,14 @@ func loadOrCreateBridgeToken() (token string, freshlyGenerated bool, err error) 
 		return env, false, nil
 	}
 
-	if data, readErr := os.ReadFile(tokenFilePath); readErr == nil {
+	if data, readErr := os.ReadFile(tokenFilePath()); readErr == nil {
 		existing := strings.TrimSpace(string(data))
 		if existing != "" {
 			return existing, false, nil
 		}
 		// File exists but is empty — fall through to regenerate.
 	} else if !os.IsNotExist(readErr) {
-		return "", false, fmt.Errorf("read %s: %w", tokenFilePath, readErr)
+		return "", false, fmt.Errorf("read %s: %w", tokenFilePath(), readErr)
 	}
 
 	// Generate a new token.
@@ -79,11 +79,11 @@ func loadOrCreateBridgeToken() (token string, freshlyGenerated bool, err error) 
 	// Ensure parent directory exists. main.go already creates store/ before
 	// this is called, but being defensive here keeps the helper testable.
 	// Owner-only (0700): store/ holds session keys and message history.
-	if mkErr := os.MkdirAll(filepath.Dir(tokenFilePath), 0o700); mkErr != nil {
+	if mkErr := os.MkdirAll(filepath.Dir(tokenFilePath()), 0o700); mkErr != nil {
 		return "", false, fmt.Errorf("create token dir: %w", mkErr)
 	}
-	if writeErr := os.WriteFile(tokenFilePath, []byte(newToken+"\n"), tokenFileMode); writeErr != nil {
-		return "", false, fmt.Errorf("write %s: %w", tokenFilePath, writeErr)
+	if writeErr := os.WriteFile(tokenFilePath(), []byte(newToken+"\n"), tokenFileMode); writeErr != nil {
+		return "", false, fmt.Errorf("write %s: %w", tokenFilePath(), writeErr)
 	}
 	return newToken, true, nil
 }
@@ -97,7 +97,7 @@ func printTokenBanner(token string, port int) {
 	fmt.Println("  WHATSAPP BRIDGE AUTH TOKEN — first-time setup")
 	fmt.Println("════════════════════════════════════════════════════════════════════")
 	fmt.Printf("  Token:          %s\n", token)
-	fmt.Printf("  Stored at:      %s (mode 0600)\n", tokenFilePath)
+	fmt.Printf("  Stored at:      %s (mode 0600)\n", tokenFilePath())
 	fmt.Printf("  Bridge URL:     http://127.0.0.1:%d/api\n", port)
 	fmt.Println()
 	fmt.Println("  The MCP server must send this token on every request:")
@@ -105,7 +105,7 @@ func printTokenBanner(token string, port int) {
 	fmt.Println()
 	fmt.Println("  Configure the whatsapp-mcp-server with one of:")
 	fmt.Println("    export WHATSAPP_BRIDGE_TOKEN=<token>")
-	fmt.Printf("    (or let it read %s automatically)\n", tokenFilePath)
+	fmt.Printf("    (or let it read %s automatically)\n", tokenFilePath())
 	fmt.Println("════════════════════════════════════════════════════════════════════")
 	fmt.Println()
 }

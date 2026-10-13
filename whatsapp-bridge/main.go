@@ -23,7 +23,6 @@ import (
 	"syscall"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/mdp/qrterminal"
 
 	"bytes"
@@ -55,8 +54,6 @@ func autoDownloadMediaEnabled() bool {
 // near NewClient for the full rationale and caveats.
 var fullHistoryPairFlag = flag.Bool("full-history-pair", false,
 	"Request full history at pair time (only effective when re-pairing; no-op for existing sessions)")
-
-const whatsmeowDBPath = "store/whatsapp.db"
 
 // getEnvBool reads a boolean env var with a default.
 // Accepts: 1/true/yes/on and 0/false/no/off (case-insensitive)
@@ -161,7 +158,7 @@ func mediaDownloadStorePaths(chatJID, mediaType, messageID string, timestamp tim
 	}
 	filename := fmt.Sprintf("%s_%s_%s%s", mediaType, timestamp.Format("20060102_150405"), messageID, ext)
 
-	storeRoot, err := filepath.Abs("store")
+	storeRoot, err := filepath.Abs(storeDir())
 	if err != nil {
 		return "", "", "", fmt.Errorf("resolve media store path: %w", err)
 	}
@@ -179,12 +176,12 @@ func NewMessageStore() (*MessageStore, error) {
 	// Create directory for database if it doesn't exist. Owner-only (0700):
 	// this holds session keys and full message history, so it shouldn't be
 	// group/other readable.
-	if err := ensureOwnerOnlyDirectory("store"); err != nil {
+	if err := ensureOwnerOnlyDirectory(storeDir()); err != nil {
 		return nil, fmt.Errorf("failed to create store directory: %v", err)
 	}
 
 	// Open SQLite database for messages
-	db, err := sql.Open("sqlite3", "file:store/messages.db?_foreign_keys=on")
+	db, err := sql.Open(sqliteDriver, sqliteDSN(storePath("messages.db"), ""))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open message database: %v", err)
 	}
@@ -244,7 +241,7 @@ func NewMessageStore() (*MessageStore, error) {
 
 	// Open whatsmeow's database read-only for contact name resolution fallback.
 	// Missing DBs are expected on first run and should not create a new file.
-	waDB, err := openWhatsmeowContactsDB(whatsmeowDBPath)
+	waDB, err := openWhatsmeowContactsDB(storePath("whatsapp.db"))
 	if err != nil {
 		fmt.Printf("Warning: could not open whatsmeow database for contact resolution: %v\n", err)
 	}
@@ -268,7 +265,7 @@ func openWhatsmeowContactsDB(path string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro", path))
+	db, err := sql.Open(sqliteDriver, sqliteDSN(path, "mode=ro"))
 	if err != nil {
 		return nil, err
 	}
@@ -2879,16 +2876,17 @@ func main() {
 
 	// Create directory for database if it doesn't exist. Owner-only (0700),
 	// same reasoning as NewMessageStore.
-	if err := ensureOwnerOnlyDirectory("store"); err != nil {
+	if err := ensureOwnerOnlyDirectory(storeDir()); err != nil {
 		logger.Errorf("Failed to create store directory: %v", err)
 		return
 	}
 
-	container, err := sqlstore.New(context.Background(), "sqlite3", "file:store/whatsapp.db?_foreign_keys=on", dbLog)
+	container, err := sqlstore.New(context.Background(), sqliteDriver, sqliteDSN(storePath("whatsapp.db"), ""), dbLog)
 	if err != nil {
 		logger.Errorf("Failed to connect to database: %v", err)
 		return
 	}
+	defer func() { _ = container.Close() }()
 
 	// Get device store - This contains session information
 	deviceStore, err := container.GetFirstDevice(context.Background())
@@ -2957,12 +2955,12 @@ func main() {
 	}
 	defer func() { _ = messageStore.Close() }()
 
-	if err := messageStore.MigrateLegacyLIDChatsToPhoneJIDs("store/whatsapp.db", logger); err != nil {
+	if err := messageStore.MigrateLegacyLIDChatsToPhoneJIDs(storePath("whatsapp.db"), logger); err != nil {
 		logger.Errorf("Failed to migrate legacy LID chat rows: %v", err)
 		return
 	}
 
-	if err := messageStore.MigrateLegacyLIDSendersToPhones("store/whatsapp.db", logger); err != nil {
+	if err := messageStore.MigrateLegacyLIDSendersToPhones(storePath("whatsapp.db"), logger); err != nil {
 		logger.Errorf("Failed to migrate legacy LID sender rows: %v", err)
 		return
 	}
@@ -3259,6 +3257,7 @@ connectionSuccess:
 	fmt.Println("REST server is running. Press Ctrl+C to disconnect and exit.")
 
 	// Start reconnection handler goroutine
+	shutdown := make(chan struct{})
 	go func() {
 		reconnectBackoff := time.Second * 5
 		maxBackoff := time.Minute * 5
@@ -3296,14 +3295,19 @@ connectionSuccess:
 					reconnectBackoff = time.Second * 5
 				}
 
-			case <-exitChan:
+			case <-shutdown:
 				return
 			}
 		}
 	}()
 
-	// Wait for termination signal
+	// Wait for termination signal. main is the only reader of exitChan: a
+	// signal is delivered once, so a second reader (the reconnect loop below
+	// used to be one) could swallow SIGTERM and leave main blocked until
+	// systemd's stop timeout SIGKILLs the bridge. Returning from main runs the
+	// deferred DB closes.
 	<-exitChan
+	close(shutdown)
 
 	fmt.Println("Disconnecting...")
 	// Disconnect client

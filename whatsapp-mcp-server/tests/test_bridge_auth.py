@@ -46,6 +46,24 @@ def test_bridge_headers_reads_token_next_to_whatsmeow_db_path(monkeypatch, tmp_p
         importlib.reload(whatsapp)
 
 
+def test_store_dir_env_locates_dbs_and_token(monkeypatch, tmp_path):
+    (tmp_path / ".bridge-token").write_text("store-dir-token\n", encoding="utf-8")
+
+    monkeypatch.delenv("WHATSAPP_BRIDGE_TOKEN", raising=False)
+    monkeypatch.delenv("WHATSAPP_DB_PATH", raising=False)
+    monkeypatch.delenv("WHATSMEOW_DB_PATH", raising=False)
+    monkeypatch.setenv("WHATSAPP_STORE_DIR", str(tmp_path))
+
+    try:
+        importlib.reload(whatsapp)
+        assert whatsapp.MESSAGES_DB_PATH == str(tmp_path / "messages.db")
+        assert whatsapp.WHATSMEOW_DB_PATH == str(tmp_path / "whatsapp.db")
+        assert whatsapp._bridge_headers() == {"Authorization": "Bearer store-dir-token"}
+    finally:
+        monkeypatch.delenv("WHATSAPP_STORE_DIR", raising=False)
+        importlib.reload(whatsapp)
+
+
 def test_bridge_headers_prefers_env_over_token_file(monkeypatch, tmp_path):
     token_file = tmp_path / ".bridge-token"
     token_file.write_text("file-token\n", encoding="utf-8")
