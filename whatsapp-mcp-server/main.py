@@ -1,9 +1,12 @@
+import functools
 import os
 import signal
 import sys
 import tempfile
+from collections.abc import Callable
 from typing import Annotated, Any
 
+import anyio.to_thread
 from mcp.server.fastmcp import FastMCP, Image
 from pydantic import Field
 
@@ -77,6 +80,23 @@ from whatsapp import (
 # Initialize FastMCP server. Env-var handling is deferred to the __main__ block
 # so importing this module never parses env vars or exits the process.
 mcp = FastMCP("whatsapp")
+
+
+def blocking_tool(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Register a tool that waits on the bridge, a subprocess or a remote API.
+
+    FastMCP runs a sync tool on the event loop, so over http/sse one slow call would stall every
+    client. The registered wrapper runs it in a worker thread instead. The decorated name stays the
+    plain function, so callers (and tests) can still call it directly.
+    """
+
+    @functools.wraps(fn)
+    async def run_in_thread(*args: Any, **kwargs: Any) -> Any:
+        return await anyio.to_thread.run_sync(functools.partial(fn, *args, **kwargs))
+
+    mcp.tool()(run_in_thread)
+    return fn
+
 
 PreviewDimension = Annotated[
     int,
@@ -194,7 +214,7 @@ def get_contact(
     }
 
 
-@mcp.tool()
+@blocking_tool
 def bridge_status() -> dict[str, Any]:
     """Check that the WhatsApp bridge is running and connected, and how fresh the local data is.
 
@@ -212,7 +232,7 @@ def bridge_status() -> dict[str, Any]:
     return whatsapp_bridge_status()
 
 
-@mcp.tool()
+@blocking_tool
 def check_whatsapp(phone_numbers: list[str]) -> dict[str, Any]:
     """Check which phone numbers are registered on WhatsApp, without sending anything.
 
@@ -340,7 +360,7 @@ def get_direct_chat_by_contact(sender_phone_number: str) -> dict[str, Any]:
     return chat
 
 
-@mcp.tool()
+@blocking_tool
 def get_group_participants(chat_jid: str) -> dict[str, Any]:
     """Get a group's name and its full member list, fetched live from WhatsApp.
 
@@ -402,7 +422,7 @@ def get_message_context(message_id: str, before: int = 5, after: int = 5) -> dic
     }
 
 
-@mcp.tool()
+@blocking_tool
 def send_message(
     recipient: str,
     message: str,
@@ -446,7 +466,7 @@ def send_message(
     return {"success": success, "message": status_message}
 
 
-@mcp.tool()
+@blocking_tool
 def send_reaction(
     recipient: str,
     message_id: str,
@@ -472,7 +492,7 @@ def send_reaction(
     return {"success": success, "message": status_message}
 
 
-@mcp.tool()
+@blocking_tool
 def delete_message(chat_jid: str, message_id: str) -> dict[str, Any]:
     """Delete a message you sent for everyone in the chat ("Delete for everyone").
 
@@ -492,7 +512,7 @@ def delete_message(chat_jid: str, message_id: str) -> dict[str, Any]:
     return {"success": success, "message": status_message}
 
 
-@mcp.tool()
+@blocking_tool
 def mark_messages_read(
     message_ids: list[str],
     chat_jid: str,
@@ -517,7 +537,7 @@ def mark_messages_read(
     return {"success": success, "message": status_message}
 
 
-@mcp.tool()
+@blocking_tool
 def send_file(recipient: str, media_path: str, caption: str = "") -> dict[str, Any]:
     """Send a file (image, video, document) via WhatsApp, optionally with a caption.
 
@@ -542,7 +562,7 @@ def send_file(recipient: str, media_path: str, caption: str = "") -> dict[str, A
     return {"success": success, "message": status_message}
 
 
-@mcp.tool()
+@blocking_tool
 def send_audio_message(recipient: str, media_path: str) -> dict[str, Any]:
     """Send any audio file as a WhatsApp audio message to the specified recipient. For group messages use the JID. If it errors due to ffmpeg not being installed, use send_file instead.
 
@@ -558,7 +578,7 @@ def send_audio_message(recipient: str, media_path: str) -> dict[str, Any]:
     return {"success": success, "message": status_message}
 
 
-@mcp.tool()
+@blocking_tool
 def download_media(message_id: str, chat_jid: str) -> dict[str, Any]:
     """Download media from a WhatsApp message and get the local file path.
 
@@ -577,7 +597,7 @@ def download_media(message_id: str, chat_jid: str) -> dict[str, Any]:
         return {"success": False, "message": "Failed to download media"}
 
 
-@mcp.tool()
+@blocking_tool
 def view_media(
     message_id: str,
     chat_jid: str,
@@ -618,7 +638,7 @@ def view_media(
     return Image(data=data, format=image_format)
 
 
-@mcp.tool()
+@blocking_tool
 def transcribe_audio(message_id: str, chat_jid: str, force: bool = False) -> dict[str, Any]:
     """Transcribe a WhatsApp voice note and return its text.
 

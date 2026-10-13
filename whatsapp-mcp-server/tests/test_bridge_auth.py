@@ -79,7 +79,7 @@ def test_send_message_without_token_surfaces_bridge_401(monkeypatch, tmp_path):
     monkeypatch.delenv("WHATSAPP_BRIDGE_TOKEN", raising=False)
     monkeypatch.setattr(whatsapp, "_BRIDGE_TOKEN_PATH", str(missing_token))
 
-    def fake_post(url, json, headers=None):
+    def fake_post(url, json, headers=None, timeout=None):
         calls.append({"url": url, "json": json, "headers": headers})
         return DummyResponse(status_code=401, payload={"success": False}, text="Unauthorized")
 
@@ -111,7 +111,7 @@ def test_bridge_post_helpers_include_auth_headers(monkeypatch, tmp_path, func_na
     resolved_args = tuple(str(media_file) if arg == "FILE" else arg for arg in args)
     monkeypatch.setenv("WHATSAPP_BRIDGE_TOKEN", "env-token")
 
-    def fake_post(url, json, headers=None):
+    def fake_post(url, json, headers=None, timeout=None):
         calls.append({"url": url, "json": json, "headers": headers})
         return DummyResponse()
 
@@ -128,7 +128,7 @@ def test_send_reaction_posts_correct_payload(monkeypatch):
     calls = []
     monkeypatch.setenv("WHATSAPP_BRIDGE_TOKEN", "test-token")
 
-    def fake_post(url, json, headers=None):
+    def fake_post(url, json, headers=None, timeout=None):
         calls.append({"url": url, "json": json, "headers": headers})
         return DummyResponse(payload={"ok": True})
 
@@ -159,7 +159,7 @@ def test_send_reaction_empty_emoji_sends_removal(monkeypatch):
     calls = []
     monkeypatch.setenv("WHATSAPP_BRIDGE_TOKEN", "test-token")
 
-    def fake_post(url, json, headers=None):
+    def fake_post(url, json, headers=None, timeout=None):
         calls.append({"url": url, "json": json})
         return DummyResponse(payload={"ok": True})
 
@@ -193,7 +193,7 @@ def test_delete_message_posts_payload_and_reports_bridge_errors(monkeypatch):
     ]
     monkeypatch.setenv("WHATSAPP_BRIDGE_TOKEN", "test-token")
 
-    def fake_post(url, json, headers=None):
+    def fake_post(url, json, headers=None, timeout=None):
         calls.append({"url": url, "json": json})
         return responses.pop(0)
 
@@ -228,7 +228,7 @@ def test_get_group_participants_calls_bridge_and_adds_contact_names(monkeypatch)
         ],
     }
 
-    def fake_get(url, params=None, headers=None):
+    def fake_get(url, params=None, headers=None, timeout=None):
         calls.append({"url": url, "params": params, "headers": headers})
         return DummyResponse(payload=payload)
 
@@ -275,7 +275,7 @@ def test_mark_messages_read_posts_correct_payload(monkeypatch):
     calls = []
     monkeypatch.setenv("WHATSAPP_BRIDGE_TOKEN", "test-token")
 
-    def fake_post(url, json, headers=None):
+    def fake_post(url, json, headers=None, timeout=None):
         calls.append({"url": url, "json": json, "headers": headers})
         return DummyResponse(payload={"success": True, "message": "Messages marked as read"})
 
@@ -325,7 +325,7 @@ def test_send_message_with_quoted_reply_includes_quote_fields(monkeypatch):
     calls = []
     monkeypatch.setenv("WHATSAPP_BRIDGE_TOKEN", "test-token")
 
-    def fake_post(url, json, headers=None):
+    def fake_post(url, json, headers=None, timeout=None):
         calls.append({"url": url, "json": json, "headers": headers})
         return DummyResponse()
 
@@ -354,7 +354,7 @@ def test_send_message_without_quote_omits_quote_fields(monkeypatch):
     calls = []
     monkeypatch.setenv("WHATSAPP_BRIDGE_TOKEN", "test-token")
 
-    def fake_post(url, json, headers=None):
+    def fake_post(url, json, headers=None, timeout=None):
         calls.append({"url": url, "json": json})
         return DummyResponse()
 
@@ -373,7 +373,7 @@ def test_send_message_with_mentions_includes_mentions_field(monkeypatch):
     calls = []
     monkeypatch.setenv("WHATSAPP_BRIDGE_TOKEN", "test-token")
 
-    def fake_post(url, json, headers=None):
+    def fake_post(url, json, headers=None, timeout=None):
         calls.append({"url": url, "json": json})
         return DummyResponse()
 
@@ -395,7 +395,7 @@ def test_send_message_without_mentions_omits_mentions_field(monkeypatch):
     calls = []
     monkeypatch.setenv("WHATSAPP_BRIDGE_TOKEN", "test-token")
 
-    def fake_post(url, json, headers=None):
+    def fake_post(url, json, headers=None, timeout=None):
         calls.append({"url": url, "json": json})
         return DummyResponse()
 

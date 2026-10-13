@@ -4,6 +4,7 @@ import os.path
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -53,6 +54,35 @@ def _bridge_headers() -> dict[str, str]:
 
 def _bridge_unreachable_message() -> str:
     return f"Bridge not reachable at {WHATSAPP_API_BASE_URL} (connection refused or timed out). Is the WhatsApp bridge running?"
+
+
+# Seconds to wait on a bridge call that touches only WhatsApp metadata (react, revoke, group info, read
+# receipts), or runs a lookup (check) or a media download.
+BRIDGE_TIMEOUT_S = 30
+BRIDGE_CHECK_TIMEOUT_S = 60
+BRIDGE_DOWNLOAD_TIMEOUT_S = 120
+# Added on top of the bridge's send pacing to cover the WhatsApp round trip; media sends also upload.
+SEND_MARGIN_S = 30
+MEDIA_SEND_MARGIN_S = 120
+
+
+def _send_timeout(margin: float = SEND_MARGIN_S) -> float:
+    """Timeout for a send: the bridge may hold the request for WHATSAPP_SEND_MIN_INTERVAL_MS first.
+
+    Giving up sooner than the bridge answers would report a failure for a message it still sends.
+    """
+    try:
+        interval_ms = max(0, int(os.getenv("WHATSAPP_SEND_MIN_INTERVAL_MS", "").strip() or 0))
+    except ValueError:
+        interval_ms = 0  # the bridge ignores an unusable value as well
+    return interval_ms / 1000 + margin
+
+
+def _send_timed_out_message(timeout: float) -> str:
+    return (
+        f"Bridge did not answer within {timeout:.0f}s. The message may still have been delivered: "
+        "check the chat with list_messages before retrying."
+    )
 
 
 def _http_error(response: Any) -> str:
@@ -1083,7 +1113,8 @@ def send_message(
         if mentions:
             payload["mentions"] = mentions
 
-        response = requests.post(url, json=payload, headers=_bridge_headers())
+        timeout = _send_timeout()
+        response = requests.post(url, json=payload, headers=_bridge_headers(), timeout=timeout)
 
         # Check if the request was successful
         if response.status_code == 200:
@@ -1094,6 +1125,8 @@ def send_message(
 
     except requests.ConnectionError:
         return False, _bridge_unreachable_message()
+    except requests.Timeout:
+        return False, _send_timed_out_message(timeout)
     except requests.RequestException as e:
         return False, f"Request error: {str(e)}"
     except json.JSONDecodeError:
@@ -1125,7 +1158,8 @@ def send_file(recipient: str, media_path: str, caption: str = "") -> tuple[bool,
         if caption:
             payload["message"] = format_outgoing(caption)
 
-        response = requests.post(url, json=payload, headers=_bridge_headers())
+        timeout = _send_timeout(MEDIA_SEND_MARGIN_S)
+        response = requests.post(url, json=payload, headers=_bridge_headers(), timeout=timeout)
 
         # Check if the request was successful
         if response.status_code == 200:
@@ -1136,6 +1170,8 @@ def send_file(recipient: str, media_path: str, caption: str = "") -> tuple[bool,
 
     except requests.ConnectionError:
         return False, _bridge_unreachable_message()
+    except requests.Timeout:
+        return False, _send_timed_out_message(timeout)
     except requests.RequestException as e:
         return False, f"Request error: {str(e)}"
     except json.JSONDecodeError:
@@ -1168,7 +1204,8 @@ def send_audio_message(recipient: str, media_path: str) -> tuple[bool, str]:
             url = f"{WHATSAPP_API_BASE_URL}/send"
             payload = {"recipient": recipient, "media_path": media_path}
 
-            response = requests.post(url, json=payload, headers=_bridge_headers())
+            timeout = _send_timeout(MEDIA_SEND_MARGIN_S)
+            response = requests.post(url, json=payload, headers=_bridge_headers(), timeout=timeout)
 
             # Check if the request was successful
             if response.status_code == 200:
@@ -1187,6 +1224,8 @@ def send_audio_message(recipient: str, media_path: str) -> tuple[bool, str]:
 
     except requests.ConnectionError:
         return False, _bridge_unreachable_message()
+    except requests.Timeout:
+        return False, _send_timed_out_message(timeout)
     except requests.RequestException as e:
         return False, f"Request error: {str(e)}"
     except json.JSONDecodeError:
@@ -1226,7 +1265,7 @@ def bridge_status() -> dict[str, Any]:
 
     try:
         # Read-only URI so a wrong path reports an error instead of creating an empty DB.
-        conn = sqlite3.connect(f"file:{MESSAGES_DB_PATH}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"{Path(MESSAGES_DB_PATH).resolve().as_uri()}?mode=ro", uri=True)
         try:
             newest = conn.execute("SELECT MAX(timestamp) FROM messages").fetchone()[0]
         finally:
@@ -1251,7 +1290,7 @@ def check_whatsapp(phone_numbers: list[str]) -> dict[str, Any]:
             f"{WHATSAPP_API_BASE_URL}/check",
             json={"phone_numbers": phone_numbers},
             headers=_bridge_headers(),
-            timeout=60,
+            timeout=BRIDGE_CHECK_TIMEOUT_S,
         )
         if response.status_code == 200:
             return {"success": True, "results": response.json().get("results", [])}
@@ -1262,6 +1301,8 @@ def check_whatsapp(phone_numbers: list[str]) -> dict[str, Any]:
         return {"success": False, "message": f"Request error: {str(e)}"}
     except json.JSONDecodeError:
         return {"success": False, "message": f"Error parsing response: {response.text}"}
+    except Exception as e:
+        return {"success": False, "message": f"Unexpected error: {str(e)}"}
 
 
 def send_reaction(
@@ -1299,7 +1340,7 @@ def send_reaction(
             "sender_jid": sender_jid,
         }
 
-        response = requests.post(url, json=payload, headers=_bridge_headers())
+        response = requests.post(url, json=payload, headers=_bridge_headers(), timeout=BRIDGE_TIMEOUT_S)
 
         if response.status_code == 200:
             result = response.json()
@@ -1339,6 +1380,7 @@ def delete_message(chat_jid: str, message_id: str) -> tuple[bool, str]:
             f"{WHATSAPP_API_BASE_URL}/revoke",
             json={"chat_jid": chat_jid, "message_id": message_id},
             headers=_bridge_headers(),
+            timeout=BRIDGE_TIMEOUT_S,
         )
 
         if response.status_code == 200:
@@ -1374,6 +1416,7 @@ def get_group_participants(chat_jid: str) -> dict[str, Any]:
             f"{WHATSAPP_API_BASE_URL}/group-info",
             params={"jid": chat_jid},
             headers=_bridge_headers(),
+            timeout=BRIDGE_TIMEOUT_S,
         )
         if response.status_code != 200:
             return {"success": False, "message": _http_error(response)}
@@ -1437,6 +1480,7 @@ def mark_messages_read(
             f"{WHATSAPP_API_BASE_URL}/mark-read",
             json=payload,
             headers=_bridge_headers(),
+            timeout=BRIDGE_TIMEOUT_S,
         )
 
         if response.status_code == 200:
@@ -1468,7 +1512,7 @@ def download_media(message_id: str, chat_jid: str) -> str | None:
         url = f"{WHATSAPP_API_BASE_URL}/download"
         payload = {"message_id": message_id, "chat_jid": chat_jid}
 
-        response = requests.post(url, json=payload, headers=_bridge_headers())
+        response = requests.post(url, json=payload, headers=_bridge_headers(), timeout=BRIDGE_DOWNLOAD_TIMEOUT_S)
 
         if response.status_code == 200:
             result = response.json()

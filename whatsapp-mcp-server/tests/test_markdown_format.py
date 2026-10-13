@@ -93,7 +93,7 @@ class _Resp:
 def test_send_message_and_send_file_caption_are_converted(monkeypatch, tmp_path):
     posted = []
 
-    def fake_post(url, json, headers=None):
+    def fake_post(url, json, headers=None, timeout=None):
         posted.append(json)
         return _Resp()
 
@@ -112,7 +112,9 @@ def test_send_message_and_send_file_caption_are_converted(monkeypatch, tmp_path)
 def test_send_message_not_converted_when_disabled(monkeypatch):
     posted = []
     monkeypatch.setenv("WHATSAPP_MARKDOWN_CONVERT", "0")
-    monkeypatch.setattr(whatsapp.requests, "post", lambda url, json, headers=None: posted.append(json) or _Resp())
+    monkeypatch.setattr(
+        whatsapp.requests, "post", lambda url, json, headers=None, timeout=None: posted.append(json) or _Resp()
+    )
 
     whatsapp.send_message("12025551234", "**hi**")
 
