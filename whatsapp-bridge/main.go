@@ -2635,11 +2635,13 @@ func newRESTMux(client *whatsmeow.Client, messageStore *MessageStore, port int, 
 		}
 		msg := client.BuildReaction(chatJID, senderJID, req.MessageID, *req.Emoji)
 		w.Header().Set("Content-Type", "application/json")
-		if _, err := client.SendMessage(context.Background(), chatJID, msg); err != nil {
+		resp, err := client.SendMessage(context.Background(), chatJID, msg)
+		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
+		storeSentReaction(client, messageStore, chatJID, req.MessageID, *req.Emoji, resp)
 		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 	}))
 

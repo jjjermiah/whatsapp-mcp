@@ -231,7 +231,7 @@ Send (or remove) an emoji reaction to a message.
 - `from_me` (optional, default `false`): Whether the original message was sent by the current user
 - `sender_jid` (optional): Full JID of the original message sender — required for group messages when `from_me` is `false` so the correct WhatsApp key is built
 
-Inbound reactions received from others are stored automatically as messages with `media_type = "reaction"`. The `reaction_to_message_id` field in each reaction message indicates which message was reacted to.
+Inbound reactions received from others are stored automatically as messages with `media_type = "reaction"`. The `reaction_to_message_id` field in each reaction message indicates which message was reacted to. Reactions you send (or remove) through `send_reaction` are stored the same way, with `is_from_me = true`, so "who spoke last" checks see them. A removal is stored with empty content.
 
 When webhook forwarding is enabled, inbound reactions are also posted to `WEBHOOK_URL` as typed events. Reaction removals use an empty `content`/`reactionEmoji` and `reactionRemoved: true`.
 
