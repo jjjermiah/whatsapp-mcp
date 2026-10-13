@@ -9,6 +9,7 @@ middleware instead.
 """
 
 import hmac
+import sys
 from typing import Any
 
 from starlette.datastructures import Headers
@@ -16,15 +17,31 @@ from starlette.responses import JSONResponse
 
 
 class BearerTokenMiddleware:
-    """Reject every HTTP request that lacks ``Authorization: Bearer <token>``."""
+    """Reject every request that lacks ``Authorization: Bearer <token>``.
+
+    Only ``lifespan`` (server startup/shutdown, no client) bypasses the check. Any other
+    non-HTTP scope, such as a websocket, is refused rather than passed through unchecked.
+    """
 
     def __init__(self, app: Any, token: str) -> None:
         self.app = app
         self._token = token.encode()
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
-        if scope["type"] != "http" or self._authorized(Headers(scope=scope).get("authorization", "")):
+        kind = scope["type"]
+        if kind == "lifespan" or (kind == "http" and self._authorized(Headers(scope=scope).get("authorization", ""))):
             await self.app(scope, receive, send)
+            return
+        client = scope.get("client")
+        # The token is never logged: only who asked and for what.
+        print(
+            f"WARNING: rejected {kind} request to {scope.get('path', '')} from {client[0] if client else 'unknown'}: "
+            "missing or invalid bearer token",
+            file=sys.stderr,
+        )
+        if kind != "http":
+            if kind == "websocket":
+                await send({"type": "websocket.close", "code": 1008})
             return
         response = JSONResponse(
             {"error": "unauthorized", "message": "missing or invalid bearer token"},

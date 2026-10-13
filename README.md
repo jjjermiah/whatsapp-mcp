@@ -550,7 +550,7 @@ Copy `.env.example` to `.env` and configure as needed:
 | `WHATSAPP_MCP_TRANSPORT` | `stdio`                                | MCP transport to serve clients: `stdio`, `http`, or `sse` |
 | `WHATSAPP_MCP_HOST`    | `127.0.0.1`                              | Bind address for the `http`/`sse` transports |
 | `WHATSAPP_MCP_PORT`    | `8000`                                   | Port for the `http`/`sse` transports |
-| `WHATSAPP_MCP_AUTH_TOKEN` | unset                                 | Shared bearer token for the `http`/`sse` transports; when set, requests without `Authorization: Bearer <token>` get 401 |
+| `WHATSAPP_MCP_AUTH_TOKEN` | unset                                 | Shared bearer token for the `http`/`sse` transports; when set, requests without `Authorization: Bearer <token>` get 401. Required when `WHATSAPP_MCP_HOST` is not loopback (the server refuses to start without it); `none` opts out explicitly |
 | `WHATSAPP_MCP_ALLOWED_HOSTS` | loopback only                      | Comma-separated extra `Host` header values accepted by the `http`/`sse` transports (e.g. a Tailscale or container hostname); `*` disables the check |
 | `WHATSAPP_MCP_ALLOWED_ORIGINS` | derived from allowed hosts       | Comma-separated extra `Origin` header values accepted by the `http`/`sse` transports (browser-based clients only) |
 | `WHATSAPP_PARENT_WATCHDOG_S` | `30`                              | Stdio parent-liveness poll interval (seconds); exits on parent reparent only |
@@ -573,17 +573,19 @@ WHATSAPP_MCP_TRANSPORT=sse uv run main.py
 recommended choice for remote connections; `sse` is kept for older clients.
 
 > **Security:** `WHATSAPP_MCP_HOST` defaults to `127.0.0.1`, so the HTTP/SSE
-> server is reachable only from the local machine. The server has no built-in
-> authentication, and the underlying bridge can read and send WhatsApp messages
-> on your account. Only bind to a non-loopback address (e.g. `0.0.0.0`) if you
-> set `WHATSAPP_MCP_AUTH_TOKEN` (below) or place an authenticating reverse proxy
-> or tunnel in front of it.
+> server is reachable only from the local machine. The underlying bridge can
+> read and send WhatsApp messages on your account, so binding to a non-loopback
+> address (e.g. `0.0.0.0`) is refused at startup unless `WHATSAPP_MCP_AUTH_TOKEN`
+> is set (below). Set `WHATSAPP_MCP_AUTH_TOKEN=none` to run unauthenticated on
+> purpose, for example behind an authenticating reverse proxy or tunnel.
 
 #### Bearer-token auth
 
 Set `WHATSAPP_MCP_AUTH_TOKEN` and the `http`/`sse` server answers `401` to any
-request that does not carry `Authorization: Bearer <token>`. Unset keeps the old
-behaviour (no auth).
+request that does not carry `Authorization: Bearer <token>`, and logs each
+rejected request (client IP, never the token) to stderr. Unset is only accepted
+on a loopback bind; on any other address the server refuses to start, unless you
+set the value to `none`.
 
 ```bash
 export WHATSAPP_MCP_AUTH_TOKEN=$(openssl rand -hex 32)

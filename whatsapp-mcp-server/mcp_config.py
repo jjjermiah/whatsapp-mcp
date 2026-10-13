@@ -35,9 +35,28 @@ def resolve_host(value: str | None) -> str:
     return (value or "").strip() or DEFAULT_MCP_HOST
 
 
+# WHATSAPP_MCP_AUTH_TOKEN value that explicitly runs a non-loopback server without auth.
+AUTH_OPT_OUT = "none"
+
+
 def resolve_auth_token(value: str | None) -> str | None:
-    """Parse WHATSAPP_MCP_AUTH_TOKEN; unset or whitespace-only means no auth."""
-    return (value or "").strip() or None
+    """Parse WHATSAPP_MCP_AUTH_TOKEN; unset, whitespace-only or "none" means no auth."""
+    token = (value or "").strip()
+    return None if not token or token.lower() == AUTH_OPT_OUT else token
+
+
+def require_auth_off_loopback(host: str, value: str | None) -> None:
+    """Refuse to serve a non-loopback bind with no token unless the operator opted out.
+
+    The server can send messages as the account, so exposing it unauthenticated by
+    leaving a variable unset is the wrong default. Raises ValueError.
+    """
+    if host in LOOPBACK_BIND_ADDRESSES or (value or "").strip():
+        return
+    raise ValueError(
+        f"Refusing to listen on {host} without authentication: set WHATSAPP_MCP_AUTH_TOKEN to a secret "
+        f"(e.g. `openssl rand -hex 32`), or to {AUTH_OPT_OUT!r} to run unauthenticated on purpose"
+    )
 
 
 def resolve_port(value: str | None) -> int:
