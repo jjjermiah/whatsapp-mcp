@@ -476,9 +476,14 @@ Copy `.env.example` to `.env` and configure as needed:
 | `WHATSAPP_BRIDGE_TOKEN` | generated next to `WHATSMEOW_DB_PATH` as `.bridge-token` | Bearer token for bridge REST calls; also signed onto outbound webhook POSTs |
 | `WHATSAPP_MEDIA_ROOTS` | `~/.local/share/whatsapp-mcp/outbox`     | Path-list of directories allowed for outbound media files |
 | `WHATSAPP_DEVICE_NAME` | `whatsmeow` (whatsmeow default)          | Label shown for this connection under WhatsApp > Linked Devices. Set to a recognisable name. Applies at pair time only (re-pair to change) |
+| `WHATSAPP_PAIR_PHONE`  | unset                                    | Phone number (international format) to pair with via an 8-character code instead of a QR scan; same as `--pair-phone` |
+| `WHATSAPP_QR_PNG_PATH` | `<WHATSAPP_STORE_DIR>/qr.png`            | Where the bridge writes the pairing QR as a PNG (also drawn in the terminal). Deleted once pairing succeeds |
 | `WHATSAPP_MCP_TRANSPORT` | `stdio`                                | MCP transport to serve clients: `stdio`, `http`, or `sse` |
 | `WHATSAPP_MCP_HOST`    | `127.0.0.1`                              | Bind address for the `http`/`sse` transports |
 | `WHATSAPP_MCP_PORT`    | `8000`                                   | Port for the `http`/`sse` transports |
+| `WHATSAPP_MCP_AUTH_TOKEN` | unset                                 | Shared bearer token for the `http`/`sse` transports; when set, requests without `Authorization: Bearer <token>` get 401 |
+| `WHATSAPP_MCP_ALLOWED_HOSTS` | loopback only                      | Comma-separated extra `Host` header values accepted by the `http`/`sse` transports (e.g. a Tailscale or container hostname); `*` disables the check |
+| `WHATSAPP_MCP_ALLOWED_ORIGINS` | derived from allowed hosts       | Comma-separated extra `Origin` header values accepted by the `http`/`sse` transports (browser-based clients only) |
 | `WHATSAPP_PARENT_WATCHDOG_S` | `30`                              | Stdio parent-liveness poll interval (seconds); exits on parent reparent only |
 
 ### MCP transport (stdio vs http/sse)
@@ -502,7 +507,51 @@ recommended choice for remote connections; `sse` is kept for older clients.
 > server is reachable only from the local machine. The server has no built-in
 > authentication, and the underlying bridge can read and send WhatsApp messages
 > on your account. Only bind to a non-loopback address (e.g. `0.0.0.0`) if you
-> place an authenticating reverse proxy or tunnel in front of it.
+> set `WHATSAPP_MCP_AUTH_TOKEN` (below) or place an authenticating reverse proxy
+> or tunnel in front of it.
+
+#### Bearer-token auth
+
+Set `WHATSAPP_MCP_AUTH_TOKEN` and the `http`/`sse` server answers `401` to any
+request that does not carry `Authorization: Bearer <token>`. Unset keeps the old
+behaviour (no auth).
+
+```bash
+export WHATSAPP_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
+WHATSAPP_MCP_TRANSPORT=http WHATSAPP_MCP_HOST=0.0.0.0 uv run main.py
+
+# client side, e.g. an OpenCode remote MCP entry:
+#   "headers": { "Authorization": "Bearer <token>" }
+```
+
+This is one shared secret, sent in clear text over plain HTTP: fine on a trusted
+LAN or a Tailscale network, not across the internet without TLS in front. It is
+not MCP's OAuth flow, so clients must be given the header explicitly.
+
+#### Reaching the server by a non-loopback hostname
+
+The MCP SDK ships DNS-rebinding protection: it checks the HTTP `Host` header
+against an allow-list and answers `421 Misdirected Request` for anything else.
+Out of the box that allow-list is loopback only, so a client that reaches the
+server through a Tailscale hostname, a Docker service name, or a reverse proxy
+would get a 421 even with `WHATSAPP_MCP_HOST=0.0.0.0`. The server logs it as
+`Invalid Host header: ...`.
+
+Add the hostnames clients will use to `WHATSAPP_MCP_ALLOWED_HOSTS`:
+
+```bash
+WHATSAPP_MCP_TRANSPORT=http WHATSAPP_MCP_HOST=0.0.0.0 WHATSAPP_MCP_ALLOWED_HOSTS=myserver.tail1234.ts.net,whatsapp-mcp uv run main.py
+```
+
+- A bare hostname matches with or without a port (`myserver.tail1234.ts.net`
+  and `myserver.tail1234.ts.net:8000`). Use `host:8000` to pin a port or the
+  SDK's `host:*` form explicitly.
+- Loopback spellings (`127.0.0.1`, `localhost`, `[::1]`) always stay allowed.
+- `WHATSAPP_MCP_ALLOWED_ORIGINS` adds `Origin` values for browser-based
+  clients; `http(s)://<host>` is derived automatically for each allowed host.
+- Setting `WHATSAPP_MCP_ALLOWED_HOSTS=*` disables the check. Binding to a
+  non-loopback address **without** an allow-list also disables it (with a
+  warning on stderr) so the server stays reachable; prefer listing the hosts.
 
 ### Bridge authentication and media paths
 
@@ -769,6 +818,27 @@ message DBs, media, and `.bridge-token`. Logs are left in
 | Flag                  | Default | Description                                                                                                                                                                                                                                                       |
 | --------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--full-history-pair` | `false` | Request full history at pair time. Only takes effect on a fresh pair (no existing `whatsapp.db`); no-op for already-paired sessions. The phone ultimately decides the actual history window sent — see [Requesting full history](#requesting-full-history) below. |
+| `--pair-phone`        | unset   | Pair with an 8-character code typed on the phone instead of scanning a QR. Value is the phone's number in international format (e.g. `14155550123`). Also settable as `WHATSAPP_PAIR_PHONE`; the flag wins. Only used when no session exists yet — see [Pairing on a headless server](#pairing-on-a-headless-server). |
+
+### Pairing on a headless server
+
+On a host with no screen (a VM or container run under systemd), pair one of two ways:
+
+- **Pairing code.** Start the bridge once with `--pair-phone <your number>` (or
+  `WHATSAPP_PAIR_PHONE`). It prints `Pairing code: ABCD-1234`; read it from the
+  terminal or `journalctl -u <your unit>`. On the phone open WhatsApp >
+  Settings > Linked devices > Link a device > **Link with phone number
+  instead** and enter it. The code lives about 160 seconds; if it lapses the
+  bridge makes a new one on its next attempt. The phone must be reachable by
+  WhatsApp, and the number must include the country code with no leading `0`.
+- **QR PNG.** Without the flag the bridge writes each QR to
+  `qr.png` in the store dir (override with `WHATSAPP_QR_PNG_PATH`). Copy it to a machine
+  with a screen (for example `scp host:path/to/whatsapp-bridge/store/qr.png .`)
+  and scan it. The file is deleted when pairing succeeds.
+
+Pairing runs only while no session exists. Once `store/whatsapp.db` holds one,
+the flag and env var are ignored and a normal start reconnects. The bridge
+writes to stdout unbuffered, so lines reach `journalctl` as they are printed.
 
 ### Requesting full history
 
@@ -1020,6 +1090,10 @@ are documented in [docs/RELEASING.md](docs/RELEASING.md).
   supported linked-device client version, which can make older whatsmeow builds
   fail before pairing completes.
 - **QR Code Not Displaying**: Restart the bridge. Check terminal QR code support.
+- **QR Code Displays but the phone will not scan it**: Some terminals add line
+  spacing that breaks the half-block drawing. The bridge also writes each code
+  to `qr.png` in the store dir (override with `WHATSAPP_QR_PNG_PATH`); open that file and
+  scan it instead. It is deleted once pairing succeeds.
 - **Phone says "check your connection" after scanning**: WhatsApp answers a scan
   with a `companion_reg_refresh` notification, whatsmeow rotates the pairing
   secret, and the bridge prints a **new** QR code marked `QR code refreshed`.

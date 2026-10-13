@@ -9,7 +9,8 @@ from pydantic import Field
 
 import media_preview
 import transcription
-from mcp_config import resolve_host, resolve_port, resolve_transport
+from mcp_auth import run_with_bearer_auth
+from mcp_config import build_transport_security, resolve_auth_token, resolve_host, resolve_port, resolve_transport
 from parent_watchdog import install_stdio_parent_watchdog
 from whatsapp import (
     MESSAGES_DB_PATH,
@@ -604,19 +605,42 @@ if __name__ == "__main__":
     # Resolve the transport first: host/port are only used (and validated) for the
     # network transports, so a bad WHATSAPP_MCP_PORT can't break a stdio launch.
     # The localhost default keeps a remote server unreachable until explicitly opened up.
+    auth_token = None
     try:
         transport = resolve_transport(os.getenv("WHATSAPP_MCP_TRANSPORT"))
         if transport != "stdio":
+            auth_token = resolve_auth_token(os.getenv("WHATSAPP_MCP_AUTH_TOKEN"))
             mcp.settings.host = resolve_host(os.getenv("WHATSAPP_MCP_HOST"))
             mcp.settings.port = resolve_port(os.getenv("WHATSAPP_MCP_PORT"))
+            # FastMCP froze a loopback-only Host allow-list when it was constructed
+            # above (default host). Re-derive it for the real bind address, or every
+            # non-loopback caller gets 421 Misdirected Request.
+            security = build_transport_security(
+                mcp.settings.host,
+                os.getenv("WHATSAPP_MCP_ALLOWED_HOSTS"),
+                os.getenv("WHATSAPP_MCP_ALLOWED_ORIGINS"),
+            )
+            if security is not None:
+                mcp.settings.transport_security = security
+                if not security.enable_dns_rebinding_protection:
+                    print(
+                        "WARNING: accepting any Host header (no WHATSAPP_MCP_ALLOWED_HOSTS set); "
+                        "set it to the hostname(s) clients use to keep DNS-rebinding protection on",
+                        file=sys.stderr,
+                    )
             # stdout is reserved for the protocol on stdio; log startup to stderr.
             print(
                 f"WhatsApp MCP server listening on {mcp.settings.host}:{mcp.settings.port} via {transport}",
                 file=sys.stderr,
             )
+            if auth_token:
+                print("Bearer-token auth enabled (WHATSAPP_MCP_AUTH_TOKEN)", file=sys.stderr)
     except ValueError as exc:
         raise SystemExit(str(exc)) from None
 
     if transport == "stdio":
         install_stdio_parent_watchdog("WHATSAPP_PARENT_WATCHDOG_S", parent_pid=parent_pid)
-    mcp.run(transport=transport)
+    if auth_token:
+        run_with_bearer_auth(mcp, transport, auth_token)
+    else:
+        mcp.run(transport=transport)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/binary"
@@ -22,10 +23,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"github.com/mdp/qrterminal"
-
-	"bytes"
 
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
@@ -2871,6 +2868,12 @@ func main() {
 
 	logger.Infof("%s", webhookStartupMessage(forwardSelfMessages))
 
+	pairPhone, err := resolvePairPhone(*pairPhoneFlag, os.Getenv("WHATSAPP_PAIR_PHONE"))
+	if err != nil {
+		logger.Errorf("%v", err)
+		return
+	}
+
 	// Create database connection for storing session data
 	dbLog := waLog.Stdout("Database", "INFO", true)
 
@@ -3183,11 +3186,11 @@ func main() {
 				continue
 			}
 
-			// Print QR codes for pairing with the phone.
-			switch renderPairingQRCodes(qrChan, os.Stdout, func(code string, w io.Writer) {
-				qrterminal.GenerateHalfBlock(code, qrterminal.L, w)
-			}) {
+			// Print QR codes (or a pairing code with --pair-phone) for pairing
+			// with the phone; see pairing.go.
+			switch runPairing(ctx, client, qrChan, pairPhone, os.Stdout) {
 			case pairingQRSucceeded:
+				removeQRPNG()
 				connected <- true
 			case pairingQRTimedOut:
 				logger.Warnf("QR code timed out")
