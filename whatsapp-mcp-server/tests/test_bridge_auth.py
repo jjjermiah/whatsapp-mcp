@@ -197,6 +197,62 @@ def test_delete_message_validates_input(chat_jid, message_id):
     assert success is False
 
 
+def test_get_group_participants_calls_bridge_and_adds_contact_names(monkeypatch):
+    calls = []
+    monkeypatch.setenv("WHATSAPP_BRIDGE_TOKEN", "test-token")
+    group = "120363000000000000@g.us"
+    payload = {
+        "jid": group,
+        "name": "Family",
+        "participants": [
+            {"jid": "15555550100@s.whatsapp.net", "phone": "15555550100", "is_admin": True, "is_super_admin": False},
+            {"jid": "987654321@lid", "is_admin": False, "is_super_admin": False},
+        ],
+    }
+
+    def fake_get(url, params=None, headers=None):
+        calls.append({"url": url, "params": params, "headers": headers})
+        return DummyResponse(payload=payload)
+
+    monkeypatch.setattr(whatsapp.requests, "get", fake_get)
+    monkeypatch.setattr(whatsapp, "get_sender_name", lambda jid: "Alice" if jid.startswith("1555") else jid)
+
+    result = whatsapp.get_group_participants(group)
+
+    assert calls == [
+        {
+            "url": f"{whatsapp.WHATSAPP_API_BASE_URL}/group-info",
+            "params": {"jid": group},
+            "headers": {"Authorization": "Bearer test-token"},
+        }
+    ]
+    assert result["success"] is True
+    assert result["name"] == "Family"
+    assert result["participants"] == [
+        {
+            "jid": "15555550100@s.whatsapp.net",
+            "phone": "15555550100",
+            "name": "Alice",
+            "is_admin": True,
+            "is_super_admin": False,
+        },
+        {"jid": "987654321@lid", "phone": None, "name": None, "is_admin": False, "is_super_admin": False},
+    ]
+
+
+def test_get_group_participants_rejects_non_group_and_surfaces_bridge_errors(monkeypatch):
+    assert whatsapp.get_group_participants("15555550100@s.whatsapp.net")["success"] is False
+
+    monkeypatch.setattr(
+        whatsapp.requests, "get", lambda *a, **k: DummyResponse(status_code=502, text="Failed to get group info")
+    )
+
+    result = whatsapp.get_group_participants("120363000000000000@g.us")
+
+    assert result["success"] is False
+    assert "HTTP 502" in result["message"]
+
+
 def test_mark_messages_read_posts_correct_payload(monkeypatch):
     calls = []
     monkeypatch.setenv("WHATSAPP_BRIDGE_TOKEN", "test-token")

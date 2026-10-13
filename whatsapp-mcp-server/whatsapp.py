@@ -1259,6 +1259,54 @@ def delete_message(chat_jid: str, message_id: str) -> tuple[bool, str]:
         return False, f"Unexpected error: {str(e)}"
 
 
+def get_group_participants(chat_jid: str) -> dict[str, Any]:
+    """Fetch a group's name and full member list live from WhatsApp via the bridge.
+
+    Returns {"success": True, "jid", "name", "participants": [{jid, phone, name,
+    is_admin, is_super_admin}]} or {"success": False, "message": ...}. `name` is
+    the contact name when known, else None; `phone` is None for members the
+    bridge only knows by LID.
+    """
+    try:
+        if not chat_jid.endswith("@g.us"):
+            return {"success": False, "message": "chat_jid must be a group JID (ending in @g.us)"}
+
+        response = requests.get(
+            f"{WHATSAPP_API_BASE_URL}/group-info",
+            params={"jid": chat_jid},
+            headers=_bridge_headers(),
+        )
+        if response.status_code != 200:
+            return {"success": False, "message": f"Error: HTTP {response.status_code} - {response.text}"}
+
+        info = response.json()
+        participants = []
+        for p in info.get("participants", []):
+            name = get_sender_name(p["jid"])
+            participants.append(
+                {
+                    "jid": p["jid"],
+                    "phone": p.get("phone"),
+                    "name": None if name == p["jid"] else name,
+                    "is_admin": p.get("is_admin", False),
+                    "is_super_admin": p.get("is_super_admin", False),
+                }
+            )
+        return {
+            "success": True,
+            "jid": info.get("jid", chat_jid),
+            "name": info.get("name", ""),
+            "participants": participants,
+        }
+
+    except requests.RequestException as e:
+        return {"success": False, "message": f"Request error: {str(e)}"}
+    except json.JSONDecodeError:
+        return {"success": False, "message": f"Error parsing response: {response.text}"}
+    except Exception as e:
+        return {"success": False, "message": f"Unexpected error: {str(e)}"}
+
+
 def mark_messages_read(
     message_ids: list[str],
     chat_jid: str,

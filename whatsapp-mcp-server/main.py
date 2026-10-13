@@ -31,6 +31,9 @@ from whatsapp import (
     get_direct_chat_by_contact as whatsapp_get_direct_chat_by_contact,
 )
 from whatsapp import (
+    get_group_participants as whatsapp_get_group_participants,
+)
+from whatsapp import (
     get_last_interaction as whatsapp_get_last_interaction,
 )
 from whatsapp import (
@@ -286,6 +289,24 @@ def get_direct_chat_by_contact(sender_phone_number: str) -> dict[str, Any]:
     """
     chat = whatsapp_get_direct_chat_by_contact(sender_phone_number)
     return chat
+
+
+@mcp.tool()
+def get_group_participants(chat_jid: str) -> dict[str, Any]:
+    """Get a group's name and its full member list, fetched live from WhatsApp.
+
+    The local database only knows group members who have sent a message, so use
+    this to see who is really in a group. Requires the bridge to be running.
+
+    Args:
+        chat_jid: The group JID (e.g., "123456789@g.us")
+
+    Returns:
+        {"success": True, "jid", "name" (group subject), "participants": [{"jid", "phone"
+        (None if the member is only known by LID), "name" (contact name, None if unknown),
+        "is_admin", "is_super_admin"}]}, or {"success": False, "message": ...}
+    """
+    return whatsapp_get_group_participants(chat_jid)
 
 
 @mcp.tool()
