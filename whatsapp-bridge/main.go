@@ -1460,8 +1460,10 @@ func resolveMentionJIDs(client *whatsmeow.Client, mentions []string) []string {
 	return resolved
 }
 
-// Function to send a WhatsApp message
-func sendWhatsAppMessage(client *whatsmeow.Client, messageStore *MessageStore, recipient string, message string, mediaPath string, quotedMsgID string, quotedSenderJID string, quotedContent string, mentions []string) (bool, string) {
+// Function to send a WhatsApp message. recipientJID is the addressing JID
+// resolveRecipientJID produced for recipient; the caller resolves once so the
+// server is not queried twice.
+func sendWhatsAppMessage(client *whatsmeow.Client, messageStore *MessageStore, recipient string, recipientJID types.JID, message string, mediaPath string, quotedMsgID string, quotedSenderJID string, quotedContent string, mentions []string) (bool, string) {
 	if !client.IsConnected() {
 		return false, "Not connected to WhatsApp"
 	}
@@ -1488,11 +1490,6 @@ func sendWhatsAppMessage(client *whatsmeow.Client, messageStore *MessageStore, r
 	// for outbound we keep the pre-resolution form so the chat stays unified
 	// under @s.whatsapp.net (matches what list_chats / list_messages expect).
 	storageJID := settingsLookupJID
-
-	recipientJID, err := resolveRecipientJID(client, recipient)
-	if err != nil {
-		return false, err.Error()
-	}
 
 	msg := &waProto.Message{}
 
@@ -2502,17 +2499,21 @@ func newRESTMux(client *whatsmeow.Client, messageStore *MessageStore, port int, 
 			req.Recipient, len(req.Message), resolvedMediaPath != "")
 
 		// Surface caller-fixable recipient problems (not_on_whatsapp) as 4xx
-		// instead of a generic 500. The LID mapping IsOnWhatsApp persists makes
-		// the resolve inside sendWhatsAppMessage a cache hit.
-		if _, err := resolveRecipientJID(client, req.Recipient); err != nil {
+		// instead of a generic 500, and resolve once for the send below.
+		recipientJID, err := resolveRecipientJID(client, req.Recipient)
+		if err != nil {
 			if re, ok := err.(*recipientError); ok {
 				writeSendError(w, re)
 				return
 			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(SendMessageResponse{Success: false, Message: err.Error()})
+			return
 		}
 
 		// Send the message
-		success, message := sendWhatsAppMessage(client, messageStore, req.Recipient, req.Message, resolvedMediaPath, req.QuotedMessageID, req.QuotedSenderJID, req.QuotedContent, req.Mentions)
+		success, message := sendWhatsAppMessage(client, messageStore, req.Recipient, recipientJID, req.Message, resolvedMediaPath, req.QuotedMessageID, req.QuotedSenderJID, req.QuotedContent, req.Mentions)
 		fmt.Printf("← /api/send success=%v status=%q\n", success, message)
 		// Set response headers
 		w.Header().Set("Content-Type", "application/json")
