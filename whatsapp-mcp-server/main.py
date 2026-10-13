@@ -16,6 +16,9 @@ from whatsapp import (
     msg_to_dict,
 )
 from whatsapp import (
+    bridge_status as whatsapp_bridge_status,
+)
+from whatsapp import (
     check_whatsapp as whatsapp_check_whatsapp,
 )
 from whatsapp import (
@@ -182,6 +185,24 @@ def get_contact(
         "is_lid": is_lid,
         "resolved": resolved,
     }
+
+
+@mcp.tool()
+def bridge_status() -> dict[str, Any]:
+    """Check that the WhatsApp bridge is running and connected, and how fresh the local data is.
+
+    Reading tools use a local database and keep working when the bridge is down, so call
+    this before a send or when messages look stale. Sending tools fail with "Bridge not
+    reachable" when it is down.
+
+    Returns:
+        bridge_url, reachable (bridge answered), connected (bridge is logged in and connected
+        to WhatsApp), status ("ok", "disconnected", "unreachable", ...), db_path (the messages
+        database being read), newest_message_timestamp (latest stored message; old values with a
+        live bridge mean the database being read is not the bridge's), and message/db_error when
+        something failed.
+    """
+    return whatsapp_bridge_status()
 
 
 @mcp.tool()

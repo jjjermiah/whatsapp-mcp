@@ -388,6 +388,19 @@ Cache reads and writes use both message ID and chat JID.
 - `chat_jid` (required): JID of the chat containing the message
 - `force` (optional): transcribe again even when a transcript is stored
 
+### Bridge Operations
+
+#### `bridge_status`
+
+Check that the Go bridge is up and connected, and how fresh the data the MCP server reads is. Reading tools use `messages.db` and keep working when the bridge is dead, so a stopped bridge is otherwise invisible until a send fails.
+
+Returns `bridge_url`, `reachable`, `connected`, `status` (`ok`, `disconnected`, `unreachable`), `db_path` (the database being read), `newest_message_timestamp`, and `message`/`db_error` on failure. Sending tools answer `Bridge not reachable at <url>` when the bridge is down.
+
+**Natural Language Examples:**
+
+- "Is the WhatsApp bridge running?"
+- "Why are my latest messages missing?"
+
 ### Chat Operations
 
 All chat tools (`list_chats`, `get_chat`, `get_direct_chat_by_contact`,
@@ -917,11 +930,12 @@ flowchart LR
         HEALTH["/api/health"]
     end
 
-    subgraph MCPTools["MCP Tools (18 total)"]
+    subgraph MCPTools["MCP Tools (19 total)"]
         direction TB
         CONT["Contact Tools<br/>search_contacts, get_contact, check_whatsapp"]
         MSG["Message Tools<br/>list_messages, send_message, etc."]
         CHAT["Chat Tools<br/>list_chats, get_chat, etc."]
+        BRIDGE["Bridge Tools<br/>bridge_status"]
         MEDIA["Media Tools<br/>send_file, download_media, etc."]
     end
 
