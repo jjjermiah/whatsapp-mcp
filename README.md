@@ -475,6 +475,7 @@ Copy `.env.example` to `.env` and configure as needed:
 | `WHATSAPP_BRIDGE_TOKEN` | generated next to `WHATSMEOW_DB_PATH` as `.bridge-token` | Bearer token for bridge REST calls; also signed onto outbound webhook POSTs |
 | `WHATSAPP_MEDIA_ROOTS` | `~/.local/share/whatsapp-mcp/outbox`     | Path-list of directories allowed for outbound media files |
 | `WHATSAPP_DEVICE_NAME` | `whatsmeow` (whatsmeow default)          | Label shown for this connection under WhatsApp > Linked Devices. Set to a recognisable name. Applies at pair time only (re-pair to change) |
+| `WHATSAPP_PAIR_PHONE`  | unset                                    | Phone number (international format) to pair with via an 8-character code instead of a QR scan; same as `--pair-phone` |
 | `WHATSAPP_QR_PNG_PATH` | `store/qr.png`                           | Where the bridge writes the pairing QR as a PNG (also drawn in the terminal). Deleted once pairing succeeds |
 | `WHATSAPP_MCP_TRANSPORT` | `stdio`                                | MCP transport to serve clients: `stdio`, `http`, or `sse` |
 | `WHATSAPP_MCP_HOST`    | `127.0.0.1`                              | Bind address for the `http`/`sse` transports |
@@ -775,6 +776,27 @@ message DBs, media, and `.bridge-token`. Logs are left in
 | Flag                  | Default | Description                                                                                                                                                                                                                                                       |
 | --------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--full-history-pair` | `false` | Request full history at pair time. Only takes effect on a fresh pair (no existing `whatsapp.db`); no-op for already-paired sessions. The phone ultimately decides the actual history window sent — see [Requesting full history](#requesting-full-history) below. |
+| `--pair-phone`        | unset   | Pair with an 8-character code typed on the phone instead of scanning a QR. Value is the phone's number in international format (e.g. `14155550123`). Also settable as `WHATSAPP_PAIR_PHONE`; the flag wins. Only used when no session exists yet — see [Pairing on a headless server](#pairing-on-a-headless-server). |
+
+### Pairing on a headless server
+
+On a host with no screen (a VM or container run under systemd), pair one of two ways:
+
+- **Pairing code.** Start the bridge once with `--pair-phone <your number>` (or
+  `WHATSAPP_PAIR_PHONE`). It prints `Pairing code: ABCD-1234`; read it from the
+  terminal or `journalctl -u <your unit>`. On the phone open WhatsApp >
+  Settings > Linked devices > Link a device > **Link with phone number
+  instead** and enter it. The code lives about 160 seconds; if it lapses the
+  bridge makes a new one on its next attempt. The phone must be reachable by
+  WhatsApp, and the number must include the country code with no leading `0`.
+- **QR PNG.** Without the flag the bridge writes each QR to
+  `store/qr.png` (override with `WHATSAPP_QR_PNG_PATH`). Copy it to a machine
+  with a screen (for example `scp host:path/to/whatsapp-bridge/store/qr.png .`)
+  and scan it. The file is deleted when pairing succeeds.
+
+Pairing runs only while no session exists. Once `store/whatsapp.db` holds one,
+the flag and env var are ignored and a normal start reconnects. The bridge
+writes to stdout unbuffered, so lines reach `journalctl` as they are printed.
 
 ### Requesting full history
 

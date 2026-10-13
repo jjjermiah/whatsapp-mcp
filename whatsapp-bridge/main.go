@@ -2873,6 +2873,12 @@ func main() {
 
 	logger.Infof("%s", webhookStartupMessage(forwardSelfMessages))
 
+	pairPhone, err := resolvePairPhone(*pairPhoneFlag, os.Getenv("WHATSAPP_PAIR_PHONE"))
+	if err != nil {
+		logger.Errorf("%v", err)
+		return
+	}
+
 	// Create database connection for storing session data
 	dbLog := waLog.Stdout("Database", "INFO", true)
 
@@ -3184,9 +3190,9 @@ func main() {
 				continue
 			}
 
-			// Print QR codes for pairing with the phone; each is also written
-			// to a PNG (pairing.go).
-			switch renderPairingQRCodes(qrChan, os.Stdout, newQRRenderer()) {
+			// Print QR codes (or a pairing code with --pair-phone) for pairing
+			// with the phone; see pairing.go.
+			switch runPairing(ctx, client, qrChan, pairPhone, os.Stdout) {
 			case pairingQRSucceeded:
 				removeQRPNG()
 				connected <- true

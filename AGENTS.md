@@ -103,6 +103,7 @@ A failing blocking job is a hard block — fix it or explain in the PR why it's 
 | `WHATSAPP_BRIDGE_TOKEN` | generated next to `WHATSMEOW_DB_PATH` as `.bridge-token` | Bearer token required for bridge REST calls |
 | `WHATSAPP_MEDIA_ROOTS` | `~/.local/share/whatsapp-mcp/outbox` | Path-list of directories allowed for outbound media files |
 | `WHATSAPP_DEVICE_NAME` | `whatsmeow` (whatsmeow default) | Linked-device label shown in WhatsApp > Linked Devices. Applied at pair time only (`store.DeviceProps.Os`); re-pair to change |
+| `WHATSAPP_PAIR_PHONE` | unset | Phone number (international format, digits) to pair with via an 8-character pairing code instead of a QR scan; same as the bridge's `--pair-phone` flag (flag wins). Only used while no session exists |
 | `WHATSAPP_QR_PNG_PATH` | `store/qr.png` | Where the bridge writes the pairing QR as a PNG (in addition to the terminal rendering); removed once pairing succeeds |
 | `WHATSAPP_MCP_TRANSPORT` | `stdio` | MCP transport to serve clients: `stdio`, `http`, or `sse` |
 | `WHATSAPP_MCP_HOST` | `127.0.0.1` | Bind address for the `http`/`sse` transports |
